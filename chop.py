@@ -1,12 +1,9 @@
-"""自動砍素材 v9：每步重新選方向 + 命中用「傷害數字」判定 + 走不動就換方向。
+"""自動砍素材 v10：森林巡邏 + 命中判定（傷害數字）+ 地標判斷在不在起始之地（不在就傳送回家）。
 
-v7/v8 的教訓：方向一旦卡住會一直往同一邊撞（森林在西側邊界時整場 0 命中）。
-v9：每步都重新評估「哪個方向有樹」，並記住「上一步是否真的走得動」來淘汰爛方向。
-
-策略（對應使用者需求：樹/石頭在森林區隨機生成、一下就砍掉、約 100 秒重生）：
-- 往最近的樹叢走，撞到東西 = 有機會砍掉它；命中就看傷害數字。
-- 連續走不動 → 淘汰該方向、換下一個候選；都沒得走 → 朝畫面上樹最密的地方走（回到森林）。
-只用拖曳（swipe），不點擊任何 UI。
+在 v9（每步重選方向、走不動的方向黑名單、傷害數字當命中）之上加：
+- 地標：畫面中央區找到「帳篷」或「SHOP」範本＝還在起始之地。
+- 連續 4 步都看不到地標 → 用傳送石回家（點右側藍色愛心 → 選單比對「起始之地」格子 → 點它）。
+只用拖曳＋（使用者授權的）傳送石點擊；不點其他任何 UI。
 """
 from __future__ import annotations
 
@@ -25,7 +22,12 @@ DRAG_ORIGIN = (600, 1650)
 TREE_HSV_LO = (62, 175, 70)
 TREE_HSV_HI = (98, 255, 235)
 MENU_BG = np.array([255, 211, 143])
+HEART = (1275, 1710)
 DMG_TPL = Path("captures/tpl_dmg151.png")
+TENT_TPL = Path("captures/tpl_tent.png")
+SHOP_TPL = Path("captures/tpl_shop.png")
+TILE_TPL = Path("captures/tpl_tile_start.png")
+LANDMARK_BOX = (650, 2200, 150, 1290)   # y1,y2,x1,x2 只在這區找地標
 
 
 def awake() -> bool:
@@ -59,7 +61,6 @@ def menu_share(img) -> float:
 
 
 def directions(img, box=detect.BOX):
-    """回傳候選 [(vx, vy, dens, dist), ...]，密度不足或太近太遠都排除。"""
     mask = tree_mask(img, box)
     y1, y2, x1, x2 = box
     nx, ny = 9, 9
@@ -84,14 +85,56 @@ def directions(img, box=detect.BOX):
     return out
 
 
+class Landmarks:
+    def __init__(self):
+        self.tent = cv2.imread(str(TENT_TPL))
+        self.shop = cv2.imread(str(SHOP_TPL))
+        self.tile = cv2.imread(str(TILE_TPL))
+        for name, t in [("tent", self.tent), ("shop", self.shop), ("tile", self.tile)]:
+            if t is None:
+                raise SystemExit(f"缺少範本 {name}")
+
+    def in_area(self, img):
+        y1, y2, x1, x2 = LANDMARK_BOX
+        reg = img[y1:y2, x1:x2]
+        for tpl in (self.tent, self.shop):
+            r = vision.find(reg, tpl, threshold=0.78)
+            if r:
+                return r
+        return None
+
+    def teleport_home(self, rec) -> bool:
+        """點傳送石 → 選單找『起始之地』 → 點它。成功回 True。"""
+        adb.tap(*HEART)
+        time.sleep(1.8)
+        menu = norm_shot()
+        if menu_share(menu) < 0.10:
+            rec({"note": "點愛心後沒開選單"})
+            return False
+        for attempt in range(5):
+            hit = vision.find(menu, self.tile, threshold=0.75)
+            if hit:
+                x, y, score = hit
+                rec({"note": "傳送回家", "tile_at": [x, y], "score": round(score, 2)})
+                adb.tap(x, y)
+                time.sleep(3.0)
+                return True
+            adb.swipe(720, 2350, 720, 1500, 700)
+            time.sleep(1.0)
+            menu = norm_shot()
+        rec({"note": "選單找不到起始之地 → 放棄傳送"})
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("minutes", type=float, nargs="?", default=6.0)
+    ap.add_argument("minutes", type=float, nargs="?", default=8.0)
     args = ap.parse_args()
 
+    lm = Landmarks()
     tpl = cv2.imread(str(DMG_TPL))
     if tpl is None:
-        raise SystemExit(f"找不到傷害數字範本 {DMG_TPL}")
+        raise SystemExit("缺少傷害數字範本")
 
     run = Path("captures") / time.strftime("chop_%Y%m%d_%H%M%S")
     run.mkdir(parents=True, exist_ok=True)
@@ -105,6 +148,8 @@ def main():
 
     deadline = time.time() + args.minutes * 60
     step = hits = 0
+    out_of_area = 0
+    teleports = 0
     last_hit_ts = None
     prev = norm_shot()
     last_dir = (0.0, -1.0)
@@ -119,13 +164,12 @@ def main():
             continue
 
         if menu_share(prev) > 0.10:
-            rec({"step": step, "note": "選單底色→離開"})
+            rec({"step": step, "note": "選單底色→拖曳離開"})
             adb.swipe(*DRAG_ORIGIN, DRAG_ORIGIN[0] - 380, DRAG_ORIGIN[1], 900)
             time.sleep(1.0)
             prev = norm_shot()
             continue
 
-        # 先看上一張有沒有傷害數字（命中會停留約 0.5-1 秒）
         m = vision.find(prev, tpl, threshold=0.72)
         if m:
             hits += 1
@@ -136,8 +180,19 @@ def main():
             rec({"step": step, "note": "命中", "at": [m[0], m[1]], "score": round(m[2], 2),
                  "距上次命中(秒)": dt_prev, "hits": hits})
 
-        cands = [(vx, vy, dens, d) for vx, vy, dens, d in directions(prev)
-                 if (vx, vy) not in tried]
+        if lm.in_area(prev):
+            out_of_area = 0
+        else:
+            out_of_area += 1
+            if out_of_area >= 4:
+                teleports += 1
+                lm.teleport_home(rec)
+                out_of_area = 0
+                tried = []
+                prev = norm_shot()
+                continue
+
+        cands = [(vx, vy, dens, d) for vx, vy, dens, d in directions(prev) if (vx, vy) not in tried]
         if not cands:
             ang = (step * 71) % 360
             vx, vy = float(np.cos(np.radians(ang))), float(np.sin(np.radians(ang)))
@@ -146,8 +201,7 @@ def main():
             vx, vy, dens, d = cands[0]
             action = "往樹走"
 
-        ms_walk = int(min(1100, max(450, 700)))
-        adb.swipe(*DRAG_ORIGIN, int(DRAG_ORIGIN[0] + vx * 340), int(DRAG_ORIGIN[1] + vy * 340), ms_walk)
+        adb.swipe(*DRAG_ORIGIN, int(DRAG_ORIGIN[0] + vx * 340), int(DRAG_ORIGIN[1] + vy * 340), 900)
         time.sleep(0.35)
         cur = norm_shot()
         dx, dy, r = vision.scroll(prev, cur)
@@ -163,11 +217,12 @@ def main():
                 no_move = 0
 
         rec({"step": step, "action": action, "dir": [round(vx, 2), round(vy, 2)],
-             "scroll": [round(dx, 1), round(dy, 1), round(r, 2)], "moved": moved, "hits": hits})
+             "scroll": [round(dx, 1), round(dy, 1), round(r, 2)], "moved": moved,
+             "in_area": bool(lm.in_area(cur)), "hits": hits, "teleports": teleports})
         prev = cur
 
     log.close()
-    print(f"done: {step} 步, {hits} 次命中, 記錄在 {run}")
+    print(f"done: {step} 步, {hits} 命中, {teleports} 次傳送回家, 記錄在 {run}")
 
 
 if __name__ == "__main__":
