@@ -1,7 +1,11 @@
-"""自動砍素材 v7：用「傷害數字」判定命中 + 更好的走動策略。
+"""自動砍素材 v9：每步重新選方向 + 命中用「傷害數字」判定 + 走不動就換方向。
 
-v6 的問題：走路效率差（每步 4 張截圖很慢、撞到東西只會換方向）。
-v7：大步走（最大 1.2 秒）、撞住就垂直滑開繞過去、每步只拍 2-3 張並檢查傷害數字。
+v7/v8 的教訓：方向一旦卡住會一直往同一邊撞（森林在西側邊界時整場 0 命中）。
+v9：每步都重新評估「哪個方向有樹」，並記住「上一步是否真的走得動」來淘汰爛方向。
+
+策略（對應使用者需求：樹/石頭在森林區隨機生成、一下就砍掉、約 100 秒重生）：
+- 往最近的樹叢走，撞到東西 = 有機會砍掉它；命中就看傷害數字。
+- 連續走不動 → 淘汰該方向、換下一個候選；都沒得走 → 朝畫面上樹最密的地方走（回到森林）。
 只用拖曳（swipe），不點擊任何 UI。
 """
 from __future__ import annotations
@@ -55,9 +59,10 @@ def menu_share(img) -> float:
 
 
 def directions(img, box=detect.BOX):
+    """回傳候選 [(vx, vy, dens, dist), ...]，密度不足或太近太遠都排除。"""
     mask = tree_mask(img, box)
     y1, y2, x1, x2 = box
-    nx, ny = 7, 7
+    nx, ny = 9, 9
     cw, ch = (x2 - x1) // nx, (y2 - y1) // ny
     cands = []
     for gy in range(ny):
@@ -65,12 +70,12 @@ def directions(img, box=detect.BOX):
             cx = x1 + gx * cw + cw // 2
             cy = y1 + gy * ch + ch // 2
             d = ((cx - ANCHOR[0]) ** 2 + (cy - ANCHOR[1]) ** 2) ** 0.5
-            if d < 150 or d > 650:
+            if d < 140 or d > 700:
                 continue
             dens = float(mask[cy - ch // 2:cy + ch // 2, cx - cw // 2:cx + cw // 2].mean()) / 255
-            if dens < 0.20:
+            if dens < 0.18:
                 continue
-            cands.append((dens - d / 2000.0, cx - ANCHOR[0], cy - ANCHOR[1], dens, d))
+            cands.append((round(dens - d / 2200.0, 4), cx - ANCHOR[0], cy - ANCHOR[1], dens, d))
     cands.sort(reverse=True)
     out = []
     for _s, vx, vy, dens, d in cands[:6]:
@@ -100,10 +105,11 @@ def main():
 
     deadline = time.time() + args.minutes * 60
     step = hits = 0
-    blocked = 0
-    dirs = []
     last_hit_ts = None
-    last_dir = (0, -1)
+    prev = norm_shot()
+    last_dir = (0.0, -1.0)
+    no_move = 0
+    tried = []
 
     while time.time() < deadline:
         step += 1
@@ -112,73 +118,53 @@ def main():
             unlock()
             continue
 
-        a = norm_shot()
-        if menu_share(a) > 0.10:
+        if menu_share(prev) > 0.10:
             rec({"step": step, "note": "選單底色→離開"})
             adb.swipe(*DRAG_ORIGIN, DRAG_ORIGIN[0] - 380, DRAG_ORIGIN[1], 900)
             time.sleep(1.0)
+            prev = norm_shot()
             continue
 
-        if not dirs:
-            dirs = directions(a)
-        if not dirs:
-            rec({"step": step, "note": "附近沒有樹→換方向巡"})
-            ang = (step * 97) % 360
-            adb.swipe(*DRAG_ORIGIN, int(DRAG_ORIGIN[0] + 300 * np.cos(np.radians(ang))),
-                      int(DRAG_ORIGIN[1] + 200 * np.sin(np.radians(ang))), 800)
-            time.sleep(0.8)
-            continue
-
-        vx, vy, dens, dist = dirs[0]
-        ms_walk = int(min(1200, max(500, dist * 1.2)))
-        adb.swipe(*DRAG_ORIGIN, int(DRAG_ORIGIN[0] + vx * 340), int(DRAG_ORIGIN[1] + vy * 340), ms_walk)
-        time.sleep(0.15)
-        last_dir = (vx, vy)
-
-        found = None
-        frames = []
-        for k in range(3):
-            b = norm_shot()
-            frames.append(b)
-            m = vision.find(b, tpl, threshold=0.72)
-            if m:
-                found = m
-                break
-            if k == 0:
-                time.sleep(0.3)
-
-        b = frames[-1]
-        dx, dy, r = vision.scroll(a, b)
-        moved = abs(dx) > 8 or abs(dy) > 8
-
-        if found:
+        # 先看上一張有沒有傷害數字（命中會停留約 0.5-1 秒）
+        m = vision.find(prev, tpl, threshold=0.72)
+        if m:
             hits += 1
             now = time.time()
             dt_prev = None if last_hit_ts is None else round(now - last_hit_ts, 1)
             last_hit_ts = now
-            cv2.imwrite(str(run / f"hit_{hits:03d}.png"), b)
-            rec({"step": step, "note": "命中", "at": [found[0], found[1]],
-                 "score": round(found[2], 2), "距上次命中(秒)": dt_prev, "hits": hits})
-            blocked = 0
-            continue
+            cv2.imwrite(str(run / f"hit_{hits:03d}.png"), prev)
+            rec({"step": step, "note": "命中", "at": [m[0], m[1]], "score": round(m[2], 2),
+                 "距上次命中(秒)": dt_prev, "hits": hits})
 
-        if moved:
-            blocked = 0
+        cands = [(vx, vy, dens, d) for vx, vy, dens, d in directions(prev)
+                 if (vx, vy) not in tried]
+        if not cands:
+            ang = (step * 71) % 360
+            vx, vy = float(np.cos(np.radians(ang))), float(np.sin(np.radians(ang)))
+            action = "探索"
         else:
-            blocked += 1
-            # 撞住 → 垂直滑開繞過去（樹很小，側滑通常能繞過）
-            px, py = -last_dir[1], last_dir[0]
-            side = 1 if (step % 2 == 0) else -1
-            adb.swipe(*DRAG_ORIGIN, int(DRAG_ORIGIN[0] + px * side * 300),
-                      int(DRAG_ORIGIN[1] + py * side * 300), 700)
-            time.sleep(0.6)
-            if blocked >= 2:
-                dirs = dirs[1:]
-                blocked = 0
+            vx, vy, dens, d = cands[0]
+            action = "往樹走"
 
-        rec({"step": step, "dir": [round(vx, 2), round(vy, 2)], "dens": round(dens, 2),
-             "dist": int(dist), "scroll": [round(dx, 1), round(dy, 1), round(r, 2)],
-             "moved": moved, "hits": hits})
+        ms_walk = int(min(1100, max(450, 700)))
+        adb.swipe(*DRAG_ORIGIN, int(DRAG_ORIGIN[0] + vx * 340), int(DRAG_ORIGIN[1] + vy * 340), ms_walk)
+        time.sleep(0.35)
+        cur = norm_shot()
+        dx, dy, r = vision.scroll(prev, cur)
+        moved = abs(dx) > 8 or abs(dy) > 8
+        if moved:
+            no_move = 0
+            tried = []
+        else:
+            no_move += 1
+            tried.append((vx, vy))
+            if no_move >= 2:
+                tried = []
+                no_move = 0
+
+        rec({"step": step, "action": action, "dir": [round(vx, 2), round(vy, 2)],
+             "scroll": [round(dx, 1), round(dy, 1), round(r, 2)], "moved": moved, "hits": hits})
+        prev = cur
 
     log.close()
     print(f"done: {step} 步, {hits} 次命中, 記錄在 {run}")
