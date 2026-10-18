@@ -21,9 +21,37 @@ from pkauto import adb, vision, hp
 from pkauto import worldmap as wm
 
 ANCHOR = (720, 1400)
-DRAG = (720, 2000)
+DRAG = (720, 2600)          # 拖曳起點（實測：越靠下越有效；2600 是 4/4 成功的點）
 MENU_BG = np.array([255, 211, 143])
 CELL = wm.CELL
+
+
+def drag(img, vx, vy, dist=250):
+    """朝 (vx,vy) 拖曳；沒動就換角度（±45/±90/±135/180°）與長度重試（自動繞障礙）。
+
+    實測：拖曳本身有效（8 方向有 6 個能動）；量到 0 幾乎都是「那個方向被擋住」。
+    回傳 (dx, dy, moved, frame, 用了幾度)。
+    """
+    import math as _m
+    base = _m.atan2(vy, vx)
+    cur = img
+    for off in (0, 45, -45, 90, -90, 135, -135, 180):
+        a = base + _m.radians(off)
+        cvx, cvy = _m.cos(a), _m.sin(a)
+        for k in (1.0, 0.65):
+            L = max(90, int(dist * k))
+            adb.swipe(*DRAG, int(DRAG[0] + cvx * L), int(DRAG[1] + cvy * L), 600)
+            time.sleep(1.3)
+            cur = shot()
+            sh = vision.shift_by_template(img, cur, threshold=0.65)
+            if sh is None:
+                s2 = vision.scroll(img, cur)
+                dx, dy, q = s2[0], s2[1], s2[2]
+            else:
+                dx, dy, q = sh[0], sh[1], sh[2]
+            if abs(dx) + abs(dy) > 25:
+                return dx, dy, True, cur, off
+    return 0.0, 0.0, False, cur, None
 
 
 def shot():
@@ -93,13 +121,18 @@ def main():
             pos[1] += -dy
 
         obs = wm.observe(img)
-        newpos, err, used = wm.localize(obs, world, pos, radius_cells=args.radius)
+        newpos, err, used, second = wm.localize(obs, world, pos, radius_cells=args.radius)
         shift = math.dist(newpos, pos)
-        if used >= 25:
+        # 只有「最佳明顯勝出（有辨別力）、誤差夠低、修正幅度合理」才採用；
+        # 否則沿用位移量測的預測值（避免地圖稀疏時被釘在同一格）。
+        decided = (err is not None and used >= 60 and err < 0.06 and shift < 220
+                   and (second is None or err < second * 0.75))
+        if decided:
             pos = [newpos[0], newpos[1]]
         wm.update(world, obs, pos)
         rec({"step": step, "note": "觀測", "moved": moved, "q": round(q, 2),
              "定位格數": used, "誤差": None if err is None else round(err, 3),
+             "次佳": None if second is None else round(second, 3), "採用": decided,
              "修正": round(shift), "pos": [round(v) for v in pos], "cells": len(world)})
 
         if not args.watch:
@@ -122,19 +155,18 @@ def main():
             gx, gy = tgt[0] * CELL + CELL / 2, tgt[1] * CELL + CELL / 2
             n = max(abs(gx - pos[0]), abs(gy - pos[1]), 1)
             vx, vy = (gx - pos[0]) / n, (gy - pos[1]) / n
-            adb.swipe(*DRAG, int(DRAG[0] + vx * 320), int(DRAG[1] + vy * 320), 700)
-            time.sleep(1.3)
-            if not moved:
+            mdx, mdy, moved2, _cur, used_off = drag(img, vx, vy)
+            img = _cur                                # 之後的位移量測從拖曳後那張開始（避免重複計算）
+            if moved2:
+                pos[0] += -mdx
+                pos[1] += -mdy
+                stuck = 0
+            else:
                 stuck += 1
-                vx, vy = -vy, vx                     # 撞牆 → 側移
-                # 拖曳長度/時間要有下限，否則遊戲會當成「點擊」（曾因此誤開商店/訓練場）
-                adb.swipe(*DRAG, int(DRAG[0] + vx * 320), int(DRAG[1] + vy * 320), 700)
-                time.sleep(0.5)
+                drag(img, -vy, vx)                   # 撞牆 → 側移繞開
                 if stuck > 15:
                     rec({"step": step, "note": "連續卡住 → 停止"})
                     break
-            else:
-                stuck = 0
 
         prev_img = img
         if step % 40 == 0:

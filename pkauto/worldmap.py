@@ -21,8 +21,9 @@ import numpy as np
 
 CELL = 60                    # 世界格子大小（px）
 VIEW = (1440, 3120)          # 畫面尺寸
-BOX = (120, 1240)            # 只取中間可視區的 x 範圍（排除左右 UI）
-FEATURES = 3                 # 水、木造、深綠地板
+BOX = (270, 1230)            # 只取中間可視區的 x 範圍（排除左右 UI）
+YBOX = (760, 2880)           # 排除畫面頂部（天空會被誤判成水）與底部 UI
+FEATURES = 3                 # 水、樹冠、深綠地板
 
 
 def _masks(img):
@@ -54,6 +55,9 @@ def observe(img) -> dict:
             wy = y0 * 4 + CELL / 2 - (VIEW[1] / 2)
             if not (BOX[0] - VIEW[0] / 2 < wx < BOX[1] - VIEW[0] / 2):
                 continue
+            yy = y0 * 4 + CELL / 2
+            if not (YBOX[0] < yy < YBOX[1]):      # 排除天空與底部 UI
+                continue
             cx, cy = int(math.floor(wx / CELL)), int(math.floor(wy / CELL))
             vals = np.array([water[y0:y0 + cs, x0:x0 + cs].mean(),
                              wood[y0:y0 + cs, x0:x0 + cs].mean(),
@@ -63,27 +67,37 @@ def observe(img) -> dict:
 
 
 def localize(obs: dict, world: dict, pred_pos, radius_cells: int = 8, min_cells: int = 25):
-    """在預測位置附近找最匹配的格子位移。回傳 (新位置, 誤差, 用了幾格)。"""
+    """在預測位置附近找最匹配的位置。
+
+    回傳 (新位置, 最佳誤差, 用了幾格, 第二好誤差)。
+    第二好誤差用來判斷「這次匹配有沒有辨別力」——地圖稀疏時很多位置都差不多，
+    硬套會把位置釘住（實測踩過），所以呼叫端要求最佳要明顯勝出才採用。
+    """
     pcx = int(math.floor(pred_pos[0] / CELL))
     pcy = int(math.floor(pred_pos[1] / CELL))
-    best = None
+    scored = []
     for dy in range(-radius_cells, radius_cells + 1):
         for dx in range(-radius_cells, radius_cells + 1):
             errs, n = 0.0, 0
             for (ocx, ocy), v in obs.items():
                 w = world.get((ocx + pcx + dx, ocy + pcy + dy))
-                if w is None or w[3] < 2:            # 該格還沒看過足夠次數
+                if w is None or w[3] < 2:
                     continue
                 avg = w[:FEATURES] / w[3]
                 errs += float(np.abs(avg - v).sum())
                 n += 1
             if n >= min_cells:
-                e = errs / n
-                if best is None or e < best[0]:
-                    best = (e, (pcx + dx) * CELL + CELL / 2, (pcy + dy) * CELL + CELL / 2, n)
-    if best is None:
-        return pred_pos, None, 0
-    return (best[1], best[2]), best[0], best[3]
+                scored.append((errs / n, (pcx + dx) * CELL + CELL / 2, (pcy + dy) * CELL + CELL / 2, n))
+    if not scored:
+        return pred_pos, None, 0, None
+    scored.sort()
+    best = scored[0]
+    second = None
+    for e, x, y, n in scored[1:]:
+        if abs(x - best[1]) > CELL * 1.5 or abs(y - best[2]) > CELL * 1.5:
+            second = e
+            break
+    return (best[1], best[2]), best[0], best[3], second
 
 
 def update(world: dict, obs: dict, pos):

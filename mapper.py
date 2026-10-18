@@ -24,7 +24,7 @@ import numpy as np
 from pkauto import adb, vision, hp
 
 ANCHOR = (720, 1400)
-DRAG = (720, 2000)
+DRAG = (720, 2600)
 CELL = 30
 MENU_BG = np.array([255, 211, 143])
 TPL = {"shop": cv2.imread("captures/tpl_shop.png"), "tent": cv2.imread("captures/tpl_tent.png")}

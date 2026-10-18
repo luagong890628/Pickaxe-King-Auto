@@ -20,7 +20,7 @@ import numpy as np
 from pkauto import adb, vision, hp
 
 ANCHOR = (720, 1400)
-DRAG = (720, 2000)
+DRAG = (720, 2600)
 MENU_BG = np.array([255, 211, 143])
 SCALE = 0.5
 CMP = (360, 780)            # 比對用的縮圖尺寸（0.25x）

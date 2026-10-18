@@ -20,7 +20,7 @@ import numpy as np
 from pkauto import adb, vision, hp
 
 ANCHOR = (720, 1400)
-DRAG_ORIGIN = (720, 2000)
+DRAG_ORIGIN = (720, 2600)
 MENU_BG = np.array([255, 211, 143])
 TENT_TPL = cv2.imread("captures/tpl_tent.png")
 REST_TPL = cv2.imread("captures/tpl_rest_dialog.png")

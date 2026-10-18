@@ -17,7 +17,7 @@ import numpy as np
 from pkauto import adb, vision, hp
 
 ANCHOR = (720, 1400)
-DRAG = (720, 2000)
+DRAG = (720, 2600)
 MENU_BG = np.array([255, 211, 143])
 SCALE = 0.5
 REACH = 42          # 殘餘位移小於這個就算到達
