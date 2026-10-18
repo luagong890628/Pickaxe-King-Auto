@@ -8,6 +8,18 @@ import numpy as np
 PLAY_BOX = (700, 2900, 260, 1140)
 
 
+def normalize_brightness(img: np.ndarray, target: float = 130.0) -> np.ndarray:
+    """畫面整體偏暗時（例如手機進入調暗、夜間模式）等比提亮，讓顏色遮罩仍可用。
+
+    回傳新陣列；亮度正常時原樣回傳。
+    """
+    mean = float(img.mean())
+    if mean >= 80 or mean < 1:
+        return img
+    gain = min(12.0, target / mean)
+    return cv2.convertScaleAbs(img, alpha=gain, beta=0)
+
+
 def to_gray(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
 
