@@ -92,16 +92,19 @@ def teleport_home(out: Path) -> bool:
         adb.swipe(*DRAG_ORIGIN, DRAG_ORIGIN[0] - 380, DRAG_ORIGIN[1], 900)
         time.sleep(1.0)
     adb.tap(*HEART)
-    time.sleep(1.6)
-    for attempt in range(6):
-        s = norm_shot()
-        r = vision.find(s, TILE_START, threshold=0.75)
-        if r:
-            adb.tap(r[0], r[1])
-            time.sleep(2.5)
+    time.sleep(2.2)
+    for attempt in range(8):
+        s1 = norm_shot()
+        time.sleep(1.3)                      # 選單有慣性滑動：等它停
+        s2 = norm_shot()
+        r1 = vision.find(s1, TILE_START, threshold=0.75)
+        r2 = vision.find(s2, TILE_START, threshold=0.75)
+        if r1 and r2 and abs(r1[0] - r2[0]) < 4 and abs(r1[1] - r2[1]) < 4:
+            adb.tap(r2[0], r2[1])            # 確認靜止才點，否則會點到隔壁格（例：小麥田）
+            time.sleep(3.0)
             return menu_share(adb.screencap()) < 0.10
-        adb.swipe(720, 2400, 720, 1700, 700)
-        time.sleep(1.2)
+        adb.swipe(720, 2300, 720, 1900, 600)
+        time.sleep(1.6)
     return False
 
 
@@ -113,22 +116,26 @@ class Tracker:
         self.W = None
         self.prev = None
         self.anchors = 0
+        self.pending = {}          # 地標種類 -> 上一張的位置（用來確認不是單張誤判）
 
     def anchor(self, img):
+        """回傳 [(世界座標, 分數, 種類)]；帳篷/商店範本會撞到相似建築，所以由呼叫端做嚴格確認。"""
+        out = []
         if self.ref_kind == "gold":
             g = gold_tree(img)
-            if g is None:
-                return None, None
-            return (ANCHOR[0] - g[0], ANCHOR[1] - g[1]), "gold"
-        t = vision.find(img, TENT, threshold=0.68)
+            if g is not None:
+                out.append(((ANCHOR[0] - g[0], ANCHOR[1] - g[1]), 1.0, "gold"))
+            return out
+        t = vision.find(img, TENT, threshold=0.80)
         if t:
-            return (ANCHOR[0] - t[0], ANCHOR[1] - t[1]), "tent"
-        s = vision.find(img, SHOP, threshold=0.70)
+            out.append(((ANCHOR[0] - t[0], ANCHOR[1] - t[1]), t[2], "tent"))
+        s = vision.find(img, SHOP, threshold=0.80)
         if s:
-            return (ANCHOR[0] - s[0] + SHOP_OFF[0], ANCHOR[1] - s[1] + SHOP_OFF[1]), "shop"
-        return None, None
+            out.append(((ANCHOR[0] - s[0] + SHOP_OFF[0], ANCHOR[1] - s[1] + SHOP_OFF[1]), s[2], "shop"))
+        return out
 
     def update(self, img):
+        """里程計為主；地標只在『同一種連續兩張都對上、而且跟現有估計差 <250px』時才採用。"""
         moved = 0.0
         if self.prev is not None and self.W is not None:
             dx, dy, resp = vision.scroll(self.prev, img)
@@ -136,10 +143,22 @@ class Tracker:
                 self.W = (self.W[0] - dx, self.W[1] - dy)
                 moved = math.hypot(dx, dy)
         self.prev = img
-        a, _kind = self.anchor(img)
-        if a is not None:
-            self.W = a
-            self.anchors += 1
+        for pos, score, kind in self.anchor(img):
+            if self.W is None and score >= 0.90:      # 還沒定位時，高信心比對就直接採用
+                self.W = pos
+                self.anchors += 1
+                self.pending[kind] = pos
+                continue
+            pend = self.pending.get(kind)
+            if pend is not None and math.dist(pend, pos) < 30 and score >= 0.80:
+                if self.W is None or math.dist(self.W, pos) < 250:
+                    self.W = pos
+                    self.anchors += 1
+                    self.pending[kind] = pos
+                else:
+                    self.pending.pop(kind, None)      # 差太多 → 視為誤判，丟掉
+            else:
+                self.pending[kind] = pos
         return self.W, moved
 
 

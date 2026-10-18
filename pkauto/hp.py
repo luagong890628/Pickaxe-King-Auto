@@ -56,9 +56,10 @@ def load_templates():
 
 
 def _is_dup_unknown(gg) -> bool:
-    """已存在長得像的未知字元就不再存一份（等人工標記）。"""
+    """已存在長得像的未知字元（或已命名範本）就不再存一份。"""
     g = _norm(cv2.cvtColor(gg, cv2.COLOR_BGR2GRAY) if gg.ndim == 3 else gg)
-    for p in DIGITS_DIR.glob("_unknown_*.png"):
+    pats = list(DIGITS_DIR.glob("_unknown_*.png")) + [p for p in DIGITS_DIR.glob("*.png") if not p.stem.startswith("_")]
+    for p in pats:
         o = cv2.imdecode(np.fromfile(str(p), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
         if o is None:
             continue

@@ -64,3 +64,37 @@ def diff(a: np.ndarray, b: np.ndarray, box=None) -> float:
     if box is not None:
         a, b = crop(a, box), crop(b, box)
     return float(np.abs(a.astype(np.int16) - b.astype(np.int16)).mean())
+
+
+PATCH_SPOTS = [
+    (280, 760, 300, 300),
+    (860, 760, 300, 300),
+    (420, 1900, 300, 300),
+    (820, 1900, 300, 300),
+]
+
+
+def shift_by_template(a: np.ndarray, b: np.ndarray, threshold: float = 0.6):
+    """用「畫面範本」量兩張圖之間的位移：取幾個靜態區塊，在 b 裡找回它們。
+
+    比 phaseCorrelate 穩（畫面有雞/NPC/落葉在動時 phaseCorrelate 常失準）。
+    回傳 (dx, dy, 平均分數, 用了幾塊) 或 None。
+
+    正負號與 scroll() 一致：dx>0 表示畫面內容往右移（＝角色往左走）。
+    """
+    out = []
+    h, w = a.shape[:2]
+    for (x, y, pw, ph) in PATCH_SPOTS:
+        if x + pw > w or y + ph > h:
+            continue
+        t = a[y:y + ph, x:x + pw]
+        if float(t.std()) < 8.0:            # 純色區塊無法比對
+            continue
+        r = find(b, t, threshold=threshold)
+        if r:
+            out.append((r[0] - (x + pw // 2), r[1] - (y + ph // 2), r[2]))
+    if not out:
+        return None
+    dx = float(np.median([o[0] for o in out]))
+    dy = float(np.median([o[1] for o in out]))
+    return dx, dy, float(np.mean([o[2] for o in out])), len(out)

@@ -112,6 +112,7 @@ def main():
         print(json.dumps(o, ensure_ascii=False))
 
     hits = 0
+    progress = {}
     wp_i = None
     wps = None
     deadline = time.time() + args.minutes * 60
@@ -181,6 +182,16 @@ def main():
             cv2.imwrite(str(run / f"hit_{hits:03d}.png"), cur)
         dx, dy, resp = vision.scroll(img, cur)
         moved = resp > 0.3 and (abs(dx) > 8 or abs(dy) > 8)
+        bd, cnt = progress.get(wp_i, (d, 0))
+        if d < bd - 8:
+            progress[wp_i] = (d, 0)
+        else:
+            cnt += 1
+            progress[wp_i] = (bd, cnt)
+            if cnt >= 6:                      # 一直靠近不了 → 這個航點被擋住，跳過
+                rec({"step": step, "note": "航點走不到 → 跳過", "wp": wp_i, "d": round(d)})
+                wp_i += 1
+                continue
         k = stall.get(wp_i, 0)
         stall[wp_i] = 0 if moved else k + 1
         if not moved and stall[wp_i] < 5:
