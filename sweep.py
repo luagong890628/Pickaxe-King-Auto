@@ -21,7 +21,7 @@ import numpy as np
 from pkauto import adb, vision
 
 ANCHOR = (720, 1400)
-DRAG_ORIGIN = (600, 1650)
+DRAG_ORIGIN = (720, 2000)
 MENU_BG = np.array([255, 211, 143])
 DMG_TPL = Path("captures/tpl_dmg151.png")
 TENT_TPL = Path("captures/tpl_tent.png")

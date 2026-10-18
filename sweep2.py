@@ -25,7 +25,7 @@ import numpy as np
 from pkauto import adb, vision
 
 ANCHOR = (720, 1400)
-DRAG_ORIGIN = (600, 1650)
+DRAG_ORIGIN = (720, 2000)
 MENU_BG = np.array([255, 211, 143])
 SHOP_OFF = (400, 80)      # SHOP 相對帳篷的世界位移（實測：同一張畫面上帳篷(644,1270)、SHOP(1044,1350)）
 REACH = 85.0

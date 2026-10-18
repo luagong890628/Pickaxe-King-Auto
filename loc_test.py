@@ -15,7 +15,7 @@ import numpy as np
 from pkauto import adb, vision
 
 ANCHOR = (720, 1400)
-DRAG = (600, 1650)
+DRAG = (720, 2000)
 TENT = cv2.imread("captures/tpl_tent.png")
 SHOP = cv2.imread("captures/tpl_shop.png")
 

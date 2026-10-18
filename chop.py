@@ -18,7 +18,7 @@ import numpy as np
 from pkauto import adb, detect, vision
 
 ANCHOR = (720, 1400)
-DRAG_ORIGIN = (600, 1650)
+DRAG_ORIGIN = (720, 2000)
 TREE_HSV_LO = (62, 175, 70)
 TREE_HSV_HI = (98, 255, 235)
 MENU_BG = np.array([255, 211, 143])
