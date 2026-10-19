@@ -20,7 +20,8 @@ from pathlib import Path
 
 from pkauto import adb
 
-EV_RE = re.compile(r"\[\s*(\d+\.\d+)\]\s+(\S+):\s+(\S+)\s+(\S+)\s+([0-9a-fA-F]+)")
+# getevent 直接指定裝置時「不會」印裝置名稱，所以要讓那段是可選的
+EV_RE = re.compile(r"\[\s*(\d+\.\d+)\]\s+(?:(\S+):\s+)?(\S+)\s+(\S+)\s+(\S+)")
 
 
 def list_devices():
@@ -45,14 +46,21 @@ def list_devices():
     return devs
 
 
+BAD = ("touchpad", "proximity", "hall", "vibrator", "gpio", "key", "pen", "stylus")
+
+
 def pick_touch_device(devs):
-    for d in devs:
-        if "ABS_MT_POSITION_X" in d["ranges"] and "touch" in (d["name"] + d["path"]).lower():
+    """挑真正的螢幕觸控裝置。
+
+    坑：三星手機上還有一個 'sec_touchpad'（保護蓋觸控板），名字也有 touch，
+    但它收不到螢幕觸控 → 必須優先 'touchscreen' 並排除 touchpad/proximity 等。
+    """
+    cands = [d for d in devs if "ABS_MT_POSITION_X" in d["ranges"]
+             and not any(b in d["name"].lower() for b in BAD)]
+    for d in cands:
+        if "touchscreen" in d["name"].lower():
             return d
-    for d in devs:
-        if "ABS_MT_POSITION_X" in d["ranges"]:
-            return d
-    return None
+    return cands[0] if cands else None
 
 
 def main():
@@ -106,8 +114,17 @@ def main():
                 elif val == "UP":
                     events.append({"t": round(ts - t0, 4), "type": "up", "x": cur_x, "y": cur_y})
                     down_ts = None
+            # 邊錄邊存：隨時中斷都不會丟資料
+            if len(events) != getattr(main, "_saved", -1):
+                main._saved = len(events)
+                rec_now = {"name": args.name, "device": dev["path"], "abs_range": dev["ranges"],
+                           "screen": [w, h], "events": events}
+                json.dump(rec_now, open(out / f"{args.name}.json", "w", encoding="utf-8"), ensure_ascii=False)
+            if Path("data/touch/STOP").exists():
+                print("收到 STOP 檔 → 停止錄製")
+                break
             if len(events) % 200 == 0 and len(events):
-                print(f"  …{len(events)} 事件，{round(ts-t0,1)}s")
+                print(f"  …{len(events)} 事件，{round(ts-t0,1)}s", flush=True)
     except KeyboardInterrupt:
         print("手動停止")
     finally:
