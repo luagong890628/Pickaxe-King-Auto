@@ -106,9 +106,10 @@ def main():
     ap.add_argument("name")
     ap.add_argument("minutes", type=float, nargs="?", default=20.0)
     ap.add_argument("--passes", type=int, default=0)
+    ap.add_argument("--cycle", type=float, default=0, help="每圈間隔秒數（例如 110：走完等補到 110 秒再下一圈）")
     args = ap.parse_args()
 
-    d = json.load(open(f"captures/steps/{args.name}.json", encoding="utf-8"))
+    d = json.load(open(f"data/steps/{args.name}.json", encoding="utf-8"))
     steps = [(float(x), float(y)) for x, y in d["steps"]]
     run = Path("captures") / time.strftime("replay_%Y%m%d_%H%M%S")
     run.mkdir(parents=True, exist_ok=True)
@@ -128,8 +129,9 @@ def main():
     deadline = t0 + args.minutes * 60
 
     while time.time() < deadline:
+        pass_start = time.time()
         # 每圈開始：傳送回落點（誤差歸零）
-        rec({"note": "傳送回起始之地（重置位置）"})
+        rec({"note": "傳送回落點（重置位置）"})
         if not teleport_home(run):
             rec({"note": "傳送失敗 → 停止"})
             break
@@ -159,6 +161,13 @@ def main():
         rec({"note": "完成一圈", "passes": passes, "hits": hits})
         if args.passes and passes >= args.passes:
             break
+        if args.cycle:
+            wait = args.cycle - (time.time() - pass_start)
+            if wait > 0:                     # 走完還不到 110 秒 → 等補滿再下一圈（讓樹重生）
+                rec({"note": f"等待 {round(wait)} 秒（等樹重生）"})
+                while wait > 0 and time.time() < deadline:
+                    time.sleep(min(5, wait))
+                    wait = args.cycle - (time.time() - pass_start)
 
     mins = (time.time() - t0) / 60
     rate = ""

@@ -29,7 +29,7 @@ def main():
     ap.add_argument("--min-step", type=float, default=55.0, help="位移超過這個才記一步")
     args = ap.parse_args()
 
-    out_dir = Path("captures/steps")
+    out_dir = Path("data/steps")          # 放 git 有追蹤的目錄，避免像 captures 那樣被清掉就沒了
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{args.name}.json"
 
@@ -58,6 +58,10 @@ def main():
             print(f"  + 步驟 {len(steps)}: ({round(mv[0])}, {round(mv[1])}) 累計 {round(total)}px")
         if n % 40 == 0:
             print(f"  …{n} 次取樣，{len(steps)} 步，累計 {round(total)}px")
+        if len(steps) != getattr(main, "_saved", -1):
+            main._saved = len(steps)
+            json.dump({"name": args.name, "steps": steps}, open(out, "w", encoding="utf-8"), ensure_ascii=False)
+            print(f"  （已即時存檔 {len(steps)} 步）")
 
     json.dump({"name": args.name, "steps": steps}, open(out, "w", encoding="utf-8"), ensure_ascii=False)
     print(f"完成：{len(steps)} 步，總位移 {round(total)}px → {out}")
