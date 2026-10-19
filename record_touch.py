@@ -119,7 +119,9 @@ def main():
                 main._saved = len(events)
                 rec_now = {"name": args.name, "device": dev["path"], "abs_range": dev["ranges"],
                            "screen": [w, h], "events": events}
-                json.dump(rec_now, open(out / f"{args.name}.json", "w", encoding="utf-8"), ensure_ascii=False)
+                tmp = out / f".{args.name}.tmp"
+                json.dump(rec_now, open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
+                tmp.replace(out / f"{args.name}.json")      # 原子置換，中斷也不會寫壞
             if Path("data/touch/STOP").exists():
                 print("收到 STOP 檔 → 停止錄製")
                 break
