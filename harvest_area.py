@@ -112,22 +112,21 @@ def teleport_to(area: str, rec) -> bool:
         adb.tap(720, 300)
         time.sleep(1.2)
     opened = False
+    heart = cv2.imread("captures/tpl_heart.png")
     for i in range(6):
         s = shot()
-        b, g, r = cv2.split(s.astype("int16"))
-        m = (((b > 150) & (b > r + 40) & (r < 130))[:, 1255:1420] & True).astype(np.uint8) * 255
-        roi = m[600:2600]
-        n, _l, st, ce = cv2.connectedComponentsWithStats(roi, 8)
-        if n > 1:
-            k = max(range(1, n), key=lambda j: st[j][4])
-            if st[k][4] > 300:
-                hx, hy = int(ce[k][0]) + 1255, int(ce[k][1]) + 600
-                adb.tap(hx, hy)
-                time.sleep(2.4)
-                if menu_share(shot()) > 0.10:
-                    opened = True
-                    break
-        rec({"note": "傳送石沒開 → 等 6 秒再試", "try": i})
+        r = vision.find(s[1400:2000, 1240:1440], heart, 0.80) if heart is not None else None
+        if r:
+            hx, hy = r[0] + 1240, r[1] + 1400
+            adb.tap(hx, hy)
+            time.sleep(2.4)
+            if menu_share(shot()) > 0.10:
+                opened = True
+                rec({"note": "傳送選單已開", "heart": [hx, hy]})
+                break
+            rec({"note": "點了愛心但選單沒開（冷卻中）", "heart": [hx, hy], "try": i})
+        else:
+            rec({"note": "找不到傳送石愛心", "try": i})
         time.sleep(6.0)
     if not opened:
         return False
@@ -240,12 +239,15 @@ def main():
         vx, vy = tx - ANCHOR[0], ty - ANCHOR[1]
         norm = max(abs(vx), abs(vy), 1)
         if d <= 80:
-            time.sleep(0.55)
+            time.sleep(1.3)                      # 讓揮鎬砍完
             cur = shot()
-            if vision.find(cur, DMG_TPL, threshold=0.70):
-                hits += 1
+            still = [t for t in targets(cur)
+                     if math.hypot(t[1] - tx, t[2] - ty) < 150 and t[3] == kind]
+            if not still:
+                hits += 1                        # 目標消失 = 砍掉了
                 cv2.imwrite(str(run / f"hit_{hits:03d}.png"), cur)
-            rec({"step": step, "note": "貼上目標", "kind": kind, "d": round(d), "hits": hits})
+            rec({"step": step, "note": "貼上目標", "kind": kind, "d": round(d),
+                 "砍掉": not still, "hits": hits})
             heading = math.atan2(vy, vx) + math.pi / 2
             idle = 0
             continue
