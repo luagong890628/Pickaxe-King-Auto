@@ -55,6 +55,19 @@ def rest_box(img):
     return int(ce[best][0]) + 150, int(ce[best][1]) + 1000
 
 
+def on_grass(img, x, y, w, h) -> bool:
+    """目標下方是不是綠草地——過濾掉建築物裡的灰色道具（鐵匠鋪熔爐等）。"""
+    y1 = min(img.shape[0], y + h + 4)
+    y2 = min(img.shape[0], y + h + 46)
+    x1, x2 = max(0, x), min(img.shape[1], x + w)
+    if y2 <= y1 or x2 <= x1:
+        return False
+    strip = img[y1:y2, x1:x2]
+    hh, ss, vv = cv2.split(cv2.cvtColor(strip, cv2.COLOR_BGR2HSV))
+    green = ((hh > 35) & (hh < 100) & (ss > 60) & (vv > 60)).mean()
+    return float(green) > 0.35
+
+
 def targets(img):
     """畫面裡的樹冠/石頭，依離角色距離排序。"""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -67,6 +80,8 @@ def targets(img):
         x, y, w, hh, a = st[i]
         if a < 2500 or y < 700 or y > 2860 or x < 260 or x > 1230:
             continue
+        if not on_grass(img, x, y, w, hh):
+            continue
         tx, ty = x + w / 2, min(y + hh + 36, 2840.0)
         d = math.hypot(tx - ANCHOR[0], ty - ANCHOR[1])
         if d > 60:
@@ -76,6 +91,8 @@ def targets(img):
     for i in range(1, n2):
         x, y, w, hh, a = st2[i]
         if a < 800 or a > 9000 or w > 170 or hh > 170 or y < 700 or y > 2860 or x < 260 or x > 1230:
+            continue
+        if not on_grass(img, x, y, w, hh):
             continue
         cx, cy = x + w / 2, y + hh / 2
         d = math.hypot(cx - ANCHOR[0], cy - ANCHOR[1])
@@ -207,6 +224,15 @@ def main():
             if hp_start is None:
                 hp_start = text
             hp_now = text
+
+        # 保險：角色自己腳下不是綠草地（例如走進鐵匠鋪）→ 往南走出來
+        foot = img[ANCHOR[1] + 60:ANCHOR[1] + 170, ANCHOR[0] - 120:ANCHOR[0] + 120]
+        fh, fs, fv = cv2.split(cv2.cvtColor(foot, cv2.COLOR_BGR2HSV))
+        on_g = float(((fh > 35) & (fh < 100) & (fs > 60) & (fv > 60)).mean())
+        if on_g < 0.25:
+            rec({"step": step, "note": "腳下不是草地（在建築物裡？）→ 往南走出去", "green": round(on_g, 2)})
+            drag(img, 0, 1, 300)
+            continue
 
         cands = targets(img)
         if not cands:
