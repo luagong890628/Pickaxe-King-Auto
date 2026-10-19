@@ -16,6 +16,23 @@
 - 畫面判斷優先用可量測的訊號（相位相關位移、模板比對分數），且要在 `tests/` 用合成影像驗證，不靠目測猜。
 - 移動／採集邏輯必須能回答「現在角色在哪、目標在哪、這一步有沒有效」，效果用截圖前後差異驗證。
 
+## 目前路線（2026-10-19 使用者定案）
+
+- **採固定路線 + 1:1 重播原始搖桿操作**；不做「看畫面偵測樹/石頭」的智慧化
+  （樹會被擋住、看得到才偵測一定漏；而走過去就會自動揮砍，所以路線走過就好）。
+- 路線錄製：`record_touch.py`（getevent）→ `data/touch/<name>.json`（進版控）。
+  重播：`replay_touch2.py`（一個手勢一次 `input swipe`）＋ `run_route.py` 先傳送到落點。
+- 換手機／換觸控面板要重跑 `do_calib.py`；`data/touch/_calib.json` 與裝置綁定。
+
+## 程序管理（踩過大坑）
+
+- **Hermes 的 process kill 只殺外層**，`python.exe` 子程序會活著 →
+  多個殘留 `record_touch.py` 同時寫入同一個 JSON → 檔案損毀、資料報銷。
+- 收工後一定用
+  `powershell Get-CimInstance Win32_Process | Where CommandLine -like '*Pickaxe*'`
+  核對，沒有殘留才繼續。
+- 長時間錄製的檔案一律**原子寫入**（寫 `.tmp` 後 `os.replace`）。
+
 ## 測試
 
 ```
