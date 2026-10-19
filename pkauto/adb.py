@@ -15,8 +15,26 @@ DEFAULT_ADB = r"D:/Tools/scrcpy-win64-v3.3.4/adb.exe"
 CAPTURES = Path(__file__).resolve().parent.parent / "captures"
 
 
+ADB_BIN = DEFAULT_ADB          # 相容用；建議改用 adb_path()
+
+
 def adb_path() -> str:
     return os.environ.get("PKAUTO_ADB", DEFAULT_ADB)
+
+
+def shell(cmd: str, timeout: int = 30) -> str:
+    """執行 adb shell 指令，回傳 stdout 字串。"""
+    return _run(["shell", cmd], timeout=timeout).stdout.decode("utf-8", "replace")
+
+
+def screen_size() -> tuple[int, int]:
+    """回傳 (寬, 高) 像素。"""
+    out = shell("wm size")
+    for tok in out.split():
+        if "x" in tok and tok.replace("x", "").isdigit():
+            w, h = tok.split("x")
+            return int(w), int(h)
+    return 1440, 3120
 
 
 def _run(args, timeout=30):
