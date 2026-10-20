@@ -55,50 +55,50 @@ def parse_route(spec):
     return out
 
 
-def one_step(img, d, step_px=300.0, tries=(0, 25, -25, 45, -45)):
+def one_step(img, d, step_px=300.0):
+    """固定路線：一步 = 一次拖曳，不換角度、不側走、不繞路。"""
     vx, vy = DIRS[d]
-    base = math.atan2(vy, vx)
+    a = math.atan2(vy, vx)
     hold = int(min(1600, max(240, step_px / 315.0 * 1000)))
-    cur = img
-    for off in tries:
-        a = base + math.radians(off)
-        adb.swipe(720, 2600, int(720 + math.cos(a) * 250), int(2600 + math.sin(a) * 250), hold)
-        time.sleep(hold / 1000.0 + 0.40)
-        cur = shot()
-        sh = vision.shift_by_template(img, cur, threshold=0.6)
-        dx, dy = (sh[0], sh[1]) if sh else tuple(vision.scroll(img, cur)[:2])
-        if abs(dx) + abs(dy) > 18:
-            return dx, dy, True, cur
-    return 0.0, 0.0, False, cur
+    adb.swipe(720, 2600, int(720 + math.cos(a) * 250), int(2600 + math.sin(a) * 250), hold)
+    time.sleep(hold / 1000.0 + 0.40)
+    cur = shot()
+    sh = vision.shift_by_template(img, cur, threshold=0.6)
+    dx, dy = (sh[0], sh[1]) if sh else tuple(vision.scroll(img, cur)[:2])
+    return dx, dy, (abs(dx) + abs(dy) > 18), cur
+
+
+REST_TAP = (721, 1839)      # 起始之地往北 2 步後，休息對話框固定出現在這個位置
 
 
 def walk_north_and_rest(img, steps, rec, label):
-    """往北走 steps 步，途中若出現休息對話框就點它（帳篷在北 2 步）。"""
+    """往北走 steps 步（起始之地 2 步就到帳篷）→ 直接點固定座標休息。
+
+    使用者要求：不用偵測對話框，位置固定，點固定點就好。
+    """
     for i in range(steps):
         dx, dy, moved, img = one_step(img, "N")
         rec({"note": f"{label} 北 {i+1}/{steps}", "shift": [round(dx), round(dy)]})
-        box = rest.find_rest_dialog(img)
-        if box:
-            rec({"note": f"{label} 到帳篷 → 休息", "at": list(box)})
-            adb.tap(box[0], box[1])
-            time.sleep(4.5)
-            img = shot()
-            break
         if not moved:
             rec({"note": f"{label} 北 {i+1} 走不動"})
+    adb.tap(REST_TAP[0], REST_TAP[1])
+    time.sleep(4.5)
+    img = shot()
+    rec({"note": f"{label} 點固定位置休息", "at": list(REST_TAP),
+         "對話框還在": rest.has_rest_dialog(img)})
     return img
 
 
 def run_route(img, route, rec, label):
+    """照固定路線走完；卡住也只記錄，不繞路。"""
+    blocked = 0
     for d, n in route:
         for i in range(n):
             dx, dy, moved, img = one_step(img, d)
             if not moved:
-                rec({"note": f"{label} 卡住", "dir": NAMES[d], "i": i})
-                side = "R" if d in ("N", "S") else "N"
-                _dx, _dy, _m, img = one_step(img, side)
-                continue
-    rec({"note": f"{label} 路線完成"})
+                blocked += 1
+                rec({"note": f"{label} 這步沒動", "dir": NAMES[d], "i": i})
+    rec({"note": f"{label} 路線完成", "沒動的步數": blocked})
     return img
 
 
