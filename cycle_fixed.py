@@ -13,7 +13,7 @@
 
 實測座標（2026-10-20 measure_teleport.py）
   愛心 (1340,1670) 分數 1.00
-  選單拉回最上面（手指往下滑 2350→2600）：小村莊 (330,1880)、起始之地 (720,1850)
+  手指往上滑 500ms（內容往上 416px）：小村莊 (330,1464)、起始之地 (720,1434)
 
 用法：
     python cycle_fixed.py --minutes 240
@@ -31,11 +31,11 @@ from pkauto import adb, vision
 
 # ---- 固定座標 ----
 HEART = (1340, 1670)
-# 往南滑（手指往下）：把選單拉回最上面，讓格子位置固定
-MENU_SCROLL_FROM = (720, 2350)
-MENU_SCROLL_TO = (720, 2600)
+# 手指往上滑（內容往上）：避免之後上方新增地區時格子位置被推走
+MENU_SCROLL_FROM = (720, 2600)
+MENU_SCROLL_TO = (720, 2350)
 MENU_SCROLL_MS = 500
-TILE = {"village": (330, 1880), "start": (720, 1850)}
+TILE = {"village": (330, 1464), "start": (720, 1434)}
 REST_TAP = (721, 1839)
 
 # ---- 固定路線 ----
@@ -50,7 +50,14 @@ VILLAGE_NORTH = 3
 START_NORTH = 2
 SWEEP = [("L", 1), ("N", 1), ("R", 2), ("S", 1)]
 
-MENU_BG = None
+MENU_BG = (255, 211, 143)      # 傳送選單底色（BGR），用來確認選單有沒有關掉
+
+
+def menu_still_open(img):
+    import numpy as np
+    bg = np.array(MENU_BG)
+    mid = img[560:2840, 60:1380]
+    return float((np.abs(mid.astype(np.int16) - bg).max(axis=2) < 45).mean()) > 0.10
 
 
 def shot():
@@ -75,17 +82,25 @@ def step(img, d):
 def teleport(area, rec):
     """機械化傳送：點愛心 → 滑選單 → 點格子。"""
     adb.tap(*HEART)
-    time.sleep(2.6)
-    adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)   # 手指往下＝選單回到最上面
-    time.sleep(1.6)
+    time.sleep(2.2)
+    adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)   # 手指往上＝內容往上（上方擴增不影響）
+    time.sleep(1.3)
     adb.tap(*TILE[area])
-    time.sleep(3.0)
-    rec({"note": f"傳送 {area}"})
+    time.sleep(2.6)
+    opened = menu_still_open(shot())
+    rec({"note": f"傳送 {area}", "選單還開著": opened})
+    if opened:                      # 點歪了：再點一次同一個固定位置
+        adb.tap(*TILE[area])
+        time.sleep(3.0)
+        rec({"note": f"傳送 {area} 重試", "選單還開著": menu_still_open(shot())})
+
+
+REST_WAIT = 3.2          # 點擊休息後等動畫（原本 4.5 秒太長，實測 3 秒就結束）
 
 
 def rest(rec, img, label):
     adb.tap(*REST_TAP)
-    time.sleep(4.5)
+    time.sleep(REST_WAIT)
     img = shot()
     rec({"note": f"{label} 休息（點固定座標）"})
     return img
@@ -109,7 +124,7 @@ def sweep(img, rec, label):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=240)
-    ap.add_argument("--wait", type=float, default=10)
+    ap.add_argument("--wait", type=float, default=30)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
