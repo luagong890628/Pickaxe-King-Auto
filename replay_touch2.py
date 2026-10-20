@@ -65,6 +65,7 @@ def main():
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--gain", type=float, default=1.0, help="每段按住時間的倍率（>1 = 走更遠）")
     args = ap.parse_args()
 
     rec = json.load(open(Path("data/touch") / f"{args.name}.json", encoding="utf-8"))
@@ -86,7 +87,8 @@ def main():
             gap = min(3.0, max(0.0, (t["t0"] - t_prev_end) / max(0.05, args.speed)))
             if gap > 0:
                 time.sleep(gap)
-            dur = max(120, int((t["t1"] - t["t0"]) * 1000 / max(0.05, args.speed)))
+            # 下限 600ms（太短會被判成點擊）＋ --gain 倍率（整體走遠一點）
+            dur = max(600, int((t["t1"] - t["t0"]) * 1000 * args.gain / max(0.05, args.speed)))
             sx, sy = to_screen(*t["start"], cal)
             hx, hy = to_screen(*t["hold"], cal)
             if abs(hx - sx) + abs(hy - sy) < 40:
