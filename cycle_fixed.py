@@ -1,0 +1,168 @@
+"""機械化固定流程：小村莊 → 起始之地 → 等 10 秒 → 重複。
+
+全部固定座標、固定步數，不做任何畫面偵測（只有「位移量測」用來記錄走了多少）。
+
+流程
+  1. 點傳送石 (1340,1670) → 等選單
+  2. 選單往南滑 500ms（內容上移 416px）→ 點小村莊 (330,1464)
+  3. 往北 3 步 → 左1 北1 右2 南1
+  4. 點傳送石 → 滑 → 點起始之地 (720,1434)
+  5. 往北 2 步 → 點 (721,1839) 休息
+  6. 左1 北1 右2 南1
+  7. 等 10 秒 → 回 1
+
+實測座標（2026-10-20 measure_teleport.py）
+  愛心 (1340,1670) 分數 1.00
+  選單拉回最上面（手指往下滑 2350→2600）：小村莊 (330,1880)、起始之地 (720,1850)
+
+用法：
+    python cycle_fixed.py --minutes 240
+    python cycle_fixed.py --minutes 5 --dry-run     # 只印流程不動手機
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import time
+from pathlib import Path
+
+from pkauto import adb, vision
+
+# ---- 固定座標 ----
+HEART = (1340, 1670)
+# 往南滑（手指往下）：把選單拉回最上面，讓格子位置固定
+MENU_SCROLL_FROM = (720, 2350)
+MENU_SCROLL_TO = (720, 2600)
+MENU_SCROLL_MS = 500
+TILE = {"village": (330, 1880), "start": (720, 1850)}
+REST_TAP = (721, 1839)
+
+# ---- 固定路線 ----
+DRAG = (720, 2600)
+DRAG_LEN = 250
+STEP_PX = 300.0
+PPS = 315.0
+DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
+NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
+
+VILLAGE_NORTH = 3
+START_NORTH = 2
+SWEEP = [("L", 1), ("N", 1), ("R", 2), ("S", 1)]
+
+MENU_BG = None
+
+
+def shot():
+    return vision.normalize_brightness(adb.screencap())
+
+
+def step(img, d):
+    """一步 = 一次拖曳，固定方向、固定長度、固定時間。"""
+    vx, vy = DIRS[d]
+    hold = int(STEP_PX / PPS * 1000)
+    a = math.atan2(vy, vx)
+    adb.swipe(DRAG[0], DRAG[1],
+              int(DRAG[0] + math.cos(a) * DRAG_LEN),
+              int(DRAG[1] + math.sin(a) * DRAG_LEN), hold)
+    time.sleep(hold / 1000.0 + 0.45)
+    cur = shot()
+    sh = vision.shift_by_template(img, cur, threshold=0.6)
+    dx, dy = (sh[0], sh[1]) if sh else tuple(vision.scroll(img, cur)[:2])
+    return dx, dy, cur
+
+
+def teleport(area, rec):
+    """機械化傳送：點愛心 → 滑選單 → 點格子。"""
+    adb.tap(*HEART)
+    time.sleep(2.6)
+    adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)   # 手指往下＝選單回到最上面
+    time.sleep(1.6)
+    adb.tap(*TILE[area])
+    time.sleep(3.0)
+    rec({"note": f"傳送 {area}"})
+
+
+def rest(rec, img, label):
+    adb.tap(*REST_TAP)
+    time.sleep(4.5)
+    img = shot()
+    rec({"note": f"{label} 休息（點固定座標）"})
+    return img
+
+
+def walk(img, steps, rec, label):
+    for i in range(steps):
+        dx, dy, img = step(img, "N")
+        rec({"note": f"{label} 北 {i+1}/{steps}", "shift": [round(dx), round(dy)]})
+    return img
+
+
+def sweep(img, rec, label):
+    for d, n in SWEEP:
+        for i in range(n):
+            dx, dy, img = step(img, d)
+            rec({"note": f"{label} {NAMES[d]} {i+1}/{n}", "shift": [round(dx), round(dy)]})
+    return img
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--minutes", type=float, default=240)
+    ap.add_argument("--wait", type=float, default=10)
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+
+    plan = [
+        "傳送小村莊", f"北 {VILLAGE_NORTH} 步", "掃描 L1 N1 R2 S1",
+        "傳送起始之地", f"北 {START_NORTH} 步", "點 (721,1839) 休息", "掃描 L1 N1 R2 S1",
+        f"等 {args.wait:.0f} 秒",
+    ]
+    if args.dry_run:
+        print("流程：")
+        for i, p in enumerate(plan, 1):
+            print(f"  {i}. {p}")
+        print(f"固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
+        return
+
+    run = Path("captures") / time.strftime("fixed_%Y%m%d_%H%M%S")
+    run.mkdir(parents=True, exist_ok=True)
+    log = (run / "log.jsonl").open("w", encoding="utf-8")
+
+    def rec(o):
+        o["t"] = time.strftime("%H:%M:%S")
+        log.write(json.dumps(o, ensure_ascii=False) + "\n")
+        log.flush()
+        print(json.dumps(o, ensure_ascii=False), flush=True)
+
+    rec({"note": "開始", "wait": args.wait, "分鐘": args.minutes})
+    t0 = time.time()
+    deadline = t0 + args.minutes * 60
+    cycles = 0
+
+    while time.time() < deadline:
+        cycles += 1
+        rec({"note": f"=== 第 {cycles} 輪 ==="})
+
+        teleport("village", rec)
+        img = shot()
+        img = walk(img, VILLAGE_NORTH, rec, "小村莊")
+        img = sweep(img, rec, "小村莊")
+
+        teleport("start", rec)
+        img = shot()
+        img = walk(img, START_NORTH, rec, "起始之地")
+        img = rest(rec, img, "起始之地")
+        img = sweep(img, rec, "起始之地")
+
+        rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
+        end = min(time.time() + args.wait, deadline)
+        while time.time() < end:
+            time.sleep(min(2, end - time.time()))
+
+    rec({"note": "收工", "cycles": cycles, "小時": round((time.time() - t0) / 3600, 2)})
+    log.close()
+
+
+if __name__ == "__main__":
+    main()
