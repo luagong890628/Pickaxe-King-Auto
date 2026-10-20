@@ -105,7 +105,8 @@ def run_route(img, route, rec, label):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=480)
-    ap.add_argument("--wait", type=float, default=120, help="兩區跑完後等待秒數")
+    ap.add_argument("--wait", type=float, default=0,
+                    help="兩區跑完後等待秒數（預設 0：流程本身已約 110 秒）")
     ap.add_argument("--village-route", default=VILLAGE_ROUTE)
     ap.add_argument("--village-prefix", default=VILLAGE_PREFIX)
     ap.add_argument("--start-route", default=START_ROUTE)
