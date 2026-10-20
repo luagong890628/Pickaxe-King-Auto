@@ -22,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from pkauto import adb, hpdrop, popup, rest, restflow, teleport, vision
+from pkauto import adb, hpbar, hpdrop, popup, rest, restflow, teleport, vision
 from sweep_up import DRAG, move, shot
 
 NO_CHOP_SWITCH = 150          # 某區幾秒沒砍到就換區
@@ -34,6 +34,8 @@ def main():
     ap.add_argument("minutes", type=float, nargs="?", default=480.0)
     ap.add_argument("--areas", default="village,start")
     ap.add_argument("--no-teleport", action="store_true")
+    ap.add_argument("--rest-at", type=float, default=0.15,
+                    help="血條比例低於此值就回小屋休息（測試時可設 0.99）")
     args = ap.parse_args()
 
     run = Path("captures") / time.strftime("farm_%Y%m%d_%H%M%S")
@@ -83,6 +85,18 @@ def main():
                 sig = hpdrop.hp_sig(img)
                 continue
 
+            # 血條比例低於 15% → 立刻回去休息（比數字可靠，數字不動時條一定會縮）
+            frac = hpbar.hp_fraction(img)
+            if frac is not None and frac < args.rest_at:
+                rec({"note": "血量過低 → 回去休息", "hp_frac": round(frac, 3)})
+                ok = restflow.go_rest(verbose=lambda m: rec({"note": str(m)}))
+                rec({"note": "休息結果", "ok": ok})
+                hpbar.reset_cache()
+                img = shot()
+                sig = hpdrop.hp_sig(img)
+                last_chop = time.time()
+                continue
+
             dx, dy, moved, img = move(img, 0, -1, 320)
             if not moved:
                 stuck += 1
@@ -110,8 +124,10 @@ def main():
             sig = new_sig
 
             if passes % 20 == 0:
+                f = hpbar.hp_fraction(img)
                 rec({"note": "推進中", "area": area, "passes": passes,
-                     "area_chops": area_chops, "total": total_chops})
+                     "area_chops": area_chops, "total": total_chops,
+                     "hp_frac": None if f is None else round(f, 3)})
 
         rec({"note": "地區結束", "area": area, "chops": area_chops,
              "秒數": round(time.time() - area_t0)})
