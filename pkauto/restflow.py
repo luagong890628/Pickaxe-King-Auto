@@ -39,10 +39,9 @@ def go_rest(verbose=print) -> bool:
         return False
     time.sleep(2.5)
 
-    # 實測：起始之地傳送落點「往北走約 2 步（400px）」就會貼到帳篷
-    # 先走這條已知路徑，找不到再用八方向繞行
-    pattern = [(0, -1), (0, -1), (0, -1), (0, -1),
-               (-1, 0), (1, 0), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]
+    # 實測：起始之地傳送落點「往北 2~3 步（每步 300px）」就會貼到帳篷
+    pattern = [(0, -1), (0, -1), (0, -1),
+               (-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1)]
     for round_i in range(len(pattern)):
         img = _shot()
         if popup.close_popup(img):
@@ -62,7 +61,7 @@ def go_rest(verbose=print) -> bool:
             return True
         dx, dy = pattern[round_i % len(pattern)]
         verbose(f"  繞行找帳篷 #{round_i+1} 方向({dx},{dy})")
-        _move(dx, dy, 180)
+        _move(dx, dy, 300)
 
     # 最後再試一次
     img = _shot()
