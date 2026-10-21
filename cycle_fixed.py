@@ -51,8 +51,21 @@ MAX_HOLD_MS = 3000         # 單次按住上限；超過就平均拆段
 # ---- 路線（照順序走；每項是 (方向, px)，("REST",) = 點固定座標休息）----
 # 要調走路只改這裡；一段一個方向，距離直接用 px。
 ROUTES = {
-    "village": [("N", 950.0)],
-    "start":   [("N", 600.0), ("REST",)],
+    "village": [
+        ("N", 950.0),      # 1 往北（原「北 3 步」合併）
+        ("L", 300.0),      # 2 掃描：左 1 步
+        ("N", 300.0),      # 3 北 1 步
+        ("R", 600.0),      # 4 東 2 步
+        ("S", 300.0),      # 5 南 1 步
+    ],
+    "start": [
+        ("N", 600.0),      # 1 往北（原「北 2 步」合併）
+        ("REST",),         # 2 帳篷休息
+        ("L", 300.0),      # 3 掃描：左 1 步
+        ("N", 300.0),      # 4 北 1 步
+        ("R", 600.0),      # 5 東 2 步
+        ("S", 300.0),      # 6 南 1 步
+    ],
 }
 LABEL = {"village": "小村莊", "start": "起始之地"}
 
@@ -136,26 +149,19 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    def route_text(area):
-        parts = []
-        for act in ROUTES[area]:
-            if act[0] == "REST":
-                parts.append("休息")
-            else:
-                d, px = act
-                parts.append(f"{NAMES[d]} {px:.0f}px")
-        return " → ".join(parts)
-
-    plan = []
-    for area in ("village", "start"):
-        plan.append(f"傳送{LABEL[area]}")
-        plan.append(route_text(area))
-    plan.append(f"等 {args.wait:.0f} 秒")
     if args.dry_run:
-        print("流程：")
-        for i, p in enumerate(plan, 1):
-            print(f"  {i}. {p}")
-        print(f"固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
+        for area in ("village", "start"):
+            print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")
+            for i, act in enumerate(ROUTES[area], 1):
+                if act[0] == "REST":
+                    print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）")
+                    continue
+                d, px = act
+                n = max(1, math.ceil(px / PPS * 1000 / MAX_HOLD_MS))
+                holds = " + ".join(f"{px / n / PPS * 1000:.0f}" for _ in range(n))
+                extra = f"（拆 {n} 段）" if n > 1 else ""
+                print(f"  {i}. {NAMES[d]} {px:.0f}px → 按住 {holds}ms{extra}")
+        print(f"\n等 {args.wait:.0f} 秒後下一輪　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
 
     run = Path("captures") / time.strftime("fixed_%Y%m%d_%H%M%S")
