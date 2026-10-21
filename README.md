@@ -22,12 +22,21 @@
 
 ## 執行
 
+**雙擊 `start_auto.bat` 就會開始跑**（手機插著、遊戲開著即可）。
+要停止：在那個視窗按 Ctrl+C。
+
+命令列用法：
+
 ```bash
 P=./.venv/Scripts/python.exe
 $P cycle_fixed.py --minutes 240          # 跑 4 小時（預設最後等 30 秒）
 $P cycle_fixed.py --dry-run              # 只印流程，不動手機
 $P cycle_fixed.py --minutes 5 --wait 20  # 自訂等待秒數
 ```
+
+`start_auto.bat` 是**純 ASCII**：命令提示字元解析 .bat 時若遇到中文（尤其 UTF-8 多
+位元組）會把 echo 行拆成亂七八糟的指令，實測會出現「'結束（錯誤碼' 不是內部或外部
+命令」。中文一律留給 Python 輸出（那是執行期 stdout，cmd 不會拿去解析）。
 
 ## 設計原則（踩過的坑換來的）
 
