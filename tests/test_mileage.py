@@ -2,6 +2,7 @@
 
 模型：距離 ≈ SPEED × (按住秒 − STARTUP)
 所以：按住毫秒 = px / SPEED * 1000 + STARTUP_MS（下限 MIN_HOLD_MS）
+現況：SPEED = 346px/秒、STARTUP_MS = 0（同場兩點實測，見 cycle_fixed.py 註解）
 """
 import math
 import unittest
@@ -18,9 +19,15 @@ class TestMileage(unittest.TestCase):
             self.assertLessEqual(abs(back - px), 1.0, f"{px}px → {h}ms → {back:.1f}px")
 
     def test_reference_points(self):
-        """擬合用的兩個實測點：960px@2783ms、250px@725ms（舊式，沒補起步）。"""
-        self.assertEqual(cf.hold_ms(960), 2781)
-        self.assertEqual(cf.hold_ms(250), 847)
+        """按住毫秒對照（SPEED=346、無起步補償）。"""
+        self.assertEqual(cf.hold_ms(960), 2774)
+        self.assertEqual(cf.hold_ms(250), 722)
+
+    def test_matches_measured_legs(self):
+        """2026-10-21 同場實測兩點：2809ms→978px、847ms→291px，模型誤差 <2%。"""
+        for hold_ms, measured in ((2809, 978), (847, 291)):
+            pred = (hold_ms - cf.STARTUP_MS) / 1000 * cf.SPEED
+            self.assertLess(abs(pred - measured) / measured, 0.02, f"{hold_ms}ms 預測 {pred:.0f}px")
 
     def test_min_hold(self):
         """極短距離不可低於 500ms（否則被遊戲判成點擊）。"""

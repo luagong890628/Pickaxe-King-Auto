@@ -44,17 +44,19 @@ DRAG_LEN = 250
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
 SETTLE = 0.85          # 手指放開後的緩衝：實測放開→下一次按下 ≈ SETTLE + 0.1 秒
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
+MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
 # ---- 里程模型：距離 ≈ SPEED × (按住秒 − STARTUP) ----
-# input swipe 的手指是「用整段按住時間慢慢滑到終點」，搖桿偏移量從 0 爬到滿舵，
-# 所以起步有一小段幾乎不動。兩點實測反推（960px@2783ms→960px、250px@725ms→205px）：
-#   斜率 ≈ 367px/秒、起步延遲 ≈ 166ms
-# 因此：按住毫秒 = px / SPEED * 1000 + STARTUP_MS
-# 舊版是 px / 345 * 1000（沒補起步），短段會少走約 18%。要回舊行為：SPEED=345、STARTUP_MS=0。
-SPEED = 367.0
-STARTUP_MS = 166
+# 同場兩次實測（2026-10-21，run_leg.py village 1 2 --template）：
+#   目標 970px / 按住 2809ms → 實走 978px（348px/秒）
+#   目標 250px / 按住  847ms → 實走 291px（344px/秒）
+# 兩點都落在「≈346px/秒、沒有起步延遲」；更早的「250px 只走 205px」與這兩點不符
+# （很可能是那條腿被擋或量測誤差），不採用。
+# 若日後短段又出現系統性偏短，先重測再動 STARTUP_MS，不要憑單一筆加補償。
+SPEED = 346.0
+STARTUP_MS = 0
 
 MAX_HOLD_MS = 3000         # 單次按住上限；超過就平均拆段
 MIN_HOLD_MS = 500          # 按住下限：短於此遊戲會判成「點擊」（誤開商店/訓練場）
@@ -118,12 +120,14 @@ def step(img, d, px=None):
     if not MEASURE:
         return 0.0, 0.0, None
     cur = shot()
-    dx, dy, resp = vision.scroll(img, cur)      # 0.05s；範本比對要 0.8s，會拖慢兩步間隔
-    if resp < 0.35:                             # 相位相關不可信才退回範本比對
-        sh = vision.shift_by_template(img, cur, threshold=0.6)
-        if sh:
-            dx, dy = sh[0], sh[1]
-    return dx, dy, cur
+    if not MEASURE_TEMPLATE:
+        dx, dy, resp = vision.scroll(img, cur)  # 0.05s；範本比對要 0.8s，會拖慢兩步間隔
+        if resp >= 0.35:                        # 相位相關可信就直接用
+            return dx, dy, cur
+    sh = vision.shift_by_template(img, cur, threshold=0.6)
+    if sh:
+        return sh[0], sh[1], cur
+    return 0.0, 0.0, cur
 
 
 def teleport(area, rec):
