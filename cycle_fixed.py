@@ -42,13 +42,22 @@ REST_TAP = (721, 1839)
 DRAG = (720, 2600)
 DRAG_LEN = 250
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
-PPS = 345.0            # 實測 ≈345px/秒（按住 952ms 走 328px；315 是早期低估值）
 SETTLE = 0.85          # 手指放開後的緩衝：實測放開→下一次按下 ≈ SETTLE + 0.1 秒
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
+# ---- 里程模型：距離 ≈ SPEED × (按住秒 − STARTUP) ----
+# input swipe 的手指是「用整段按住時間慢慢滑到終點」，搖桿偏移量從 0 爬到滿舵，
+# 所以起步有一小段幾乎不動。兩點實測反推（960px@2783ms→960px、250px@725ms→205px）：
+#   斜率 ≈ 367px/秒、起步延遲 ≈ 166ms
+# 因此：按住毫秒 = px / SPEED * 1000 + STARTUP_MS
+# 舊版是 px / 345 * 1000（沒補起步），短段會少走約 18%。要回舊行為：SPEED=345、STARTUP_MS=0。
+SPEED = 367.0
+STARTUP_MS = 166
+
 MAX_HOLD_MS = 3000         # 單次按住上限；超過就平均拆段
+MIN_HOLD_MS = 500          # 按住下限：短於此遊戲會判成「點擊」（誤開商店/訓練場）
 
 # ---- 路線（照順序走；每項是 (方向, px)，("REST",) = 點固定座標休息）----
 # 要調走路只改這裡；一段一個方向，距離直接用 px。
@@ -85,11 +94,22 @@ def shot():
     return vision.normalize_brightness(adb.screencap())
 
 
+def hold_ms(px: float) -> int:
+    """要走 px 要按住幾毫秒（含起步補償）。"""
+    return int(max(MIN_HOLD_MS, px / SPEED * 1000 + STARTUP_MS))
+
+
+def split_count(px: float) -> int:
+    """一段 px 要不要拆。每段各自要付 STARTUP_MS，所以用「扣掉起步後可用時長」換算。"""
+    usable = max(1, MAX_HOLD_MS - STARTUP_MS)
+    return max(1, math.ceil(px / SPEED * 1000 / usable))
+
+
 def step(img, d, px=None):
     """一步 = 一次拖曳；距離由按住時間決定（px 預設 STEP_PX）。"""
     px = STEP_PX if px is None else float(px)
     vx, vy = DIRS[d]
-    hold = int(px / PPS * 1000)
+    hold = hold_ms(px)
     a = math.atan2(vy, vx)
     adb.swipe(DRAG[0], DRAG[1],
               int(DRAG[0] + math.cos(a) * DRAG_LEN),
@@ -128,16 +148,15 @@ REST_WAIT = 3.2          # 點擊休息後等動畫（原本 4.5 秒太長，實
 def rest(rec, img, label):
     adb.tap(*REST_TAP)
     time.sleep(REST_WAIT)
-    img = shot()
     rec({"note": f"{label} 休息（點固定座標）"})
-    return img
+    return shot() if MEASURE else img      # 不量位移就不截圖（省 0.76s）
 
 
 def leg(img, d, px, rec, label):
-    """一個方向走 px（按住時間＝px/PPS；超過 MAX_HOLD_MS 就平均拆段）。"""
+    """一個方向走 px（按住時間＝px/SPEED + 起步；超過 MAX_HOLD_MS 就平均拆段）。"""
     if px <= 0:
         return img
-    n = max(1, math.ceil(px / PPS * 1000 / MAX_HOLD_MS))
+    n = split_count(px)
     seg = px / n
     tx = ty = 0.0
     for _ in range(n):
@@ -146,7 +165,8 @@ def leg(img, d, px, rec, label):
         ty += dy
     note = f"{label} {NAMES[d]} {px:.0f}px" + (f"（拆 {n} 段）" if n > 1 else "")
     if MEASURE:
-        rec({"note": note, "shift": [round(tx), round(ty)]})
+        rec({"note": note, "shift": [round(tx), round(ty)],
+             "目標": [round(px * DIRS[d][0]), round(px * DIRS[d][1])]})
     else:
         rec({"note": note})
     return img
@@ -164,6 +184,7 @@ def main():
     MEASURE = args.measure
 
     if args.dry_run:
+        print(f"\n里程模型：px = {SPEED:.0f} × (按住秒 − {STARTUP_MS / 1000:.2f})")
         for area in ("village", "start"):
             print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")
             for i, act in enumerate(ROUTES[area], 1):
@@ -171,8 +192,8 @@ def main():
                     print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）")
                     continue
                 d, px = act
-                n = max(1, math.ceil(px / PPS * 1000 / MAX_HOLD_MS))
-                holds = " + ".join(f"{px / n / PPS * 1000:.0f}" for _ in range(n))
+                n = split_count(px)
+                holds = " + ".join(f"{hold_ms(px / n)}" for _ in range(n))
                 extra = f"（拆 {n} 段）" if n > 1 else ""
                 print(f"  {i}. {NAMES[d]} {px:.0f}px → 按住 {holds}ms{extra}")
         print(f"\n等 {args.wait:.0f} 秒後下一輪　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
