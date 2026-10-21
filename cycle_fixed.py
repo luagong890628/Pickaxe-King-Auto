@@ -43,6 +43,8 @@ DRAG = (720, 2600)
 DRAG_LEN = 250
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
 PPS = 345.0            # 實測 ≈345px/秒（按住 952ms 走 328px；315 是早期低估值）
+SETTLE = 0.85          # 手指放開後的緩衝：實測放開→下一次按下 ≈ SETTLE + 0.1 秒
+MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
@@ -52,7 +54,7 @@ MAX_HOLD_MS = 3000         # 單次按住上限；超過就平均拆段
 # 要調走路只改這裡；一段一個方向，距離直接用 px。
 ROUTES = {
     "village": [
-        ("N", 960.0),      # 1 往北（原「北 3 步」合併）
+        ("N", 970.0),      # 1 往北（原「北 3 步」合併）
         ("L", 250.0),      # 2 掃描：左 1 步（250px 試）
         ("N", 300.0),      # 3 北 1 步
         ("R", 600.0),      # 4 東 2 步
@@ -92,10 +94,15 @@ def step(img, d, px=None):
     adb.swipe(DRAG[0], DRAG[1],
               int(DRAG[0] + math.cos(a) * DRAG_LEN),
               int(DRAG[1] + math.sin(a) * DRAG_LEN), hold)
-    time.sleep(hold / 1000.0 + 0.45)
+    time.sleep(SETTLE)          # adb swipe 本身已經佔掉 hold 的時間，這裡只需緩衝
+    if not MEASURE:
+        return 0.0, 0.0, None
     cur = shot()
-    sh = vision.shift_by_template(img, cur, threshold=0.6)
-    dx, dy = (sh[0], sh[1]) if sh else tuple(vision.scroll(img, cur)[:2])
+    dx, dy, resp = vision.scroll(img, cur)      # 0.05s；範本比對要 0.8s，會拖慢兩步間隔
+    if resp < 0.35:                             # 相位相關不可信才退回範本比對
+        sh = vision.shift_by_template(img, cur, threshold=0.6)
+        if sh:
+            dx, dy = sh[0], sh[1]
     return dx, dy, cur
 
 
@@ -138,16 +145,23 @@ def leg(img, d, px, rec, label):
         tx += dx
         ty += dy
     note = f"{label} {NAMES[d]} {px:.0f}px" + (f"（拆 {n} 段）" if n > 1 else "")
-    rec({"note": note, "shift": [round(tx), round(ty)]})
+    if MEASURE:
+        rec({"note": note, "shift": [round(tx), round(ty)]})
+    else:
+        rec({"note": note})
     return img
 
 
 def main():
+    global MEASURE
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=240)
     ap.add_argument("--wait", type=float, default=30)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--measure", action="store_true",
+                    help="每段量實際位移（每段多花約 0.8 秒截圖；調 px 時用）")
     args = ap.parse_args()
+    MEASURE = args.measure
 
     if args.dry_run:
         for area in ("village", "start"):
@@ -185,7 +199,7 @@ def main():
 
         for area in ("village", "start"):
             teleport(area, rec)
-            img = shot()
+            img = shot() if MEASURE else None
             for act in ROUTES[area]:
                 if act[0] == "REST":
                     img = rest(rec, img, LABEL[area])
