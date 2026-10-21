@@ -49,6 +49,8 @@ NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 VILLAGE_NORTH = 3
 START_NORTH = 2
 SWEEP = [("L", 1), ("N", 1), ("R", 2), ("S", 1)]
+MERGE_NORTH = True      # 往北的多步合併成「一次按住」（少一次截圖量測、走得順）
+MAX_HOLD_MS = 3000      # 單次按住上限；超過就自動拆段
 
 MENU_BG = (255, 211, 143)      # 傳送選單底色（BGR），用來確認選單有沒有關掉
 
@@ -64,10 +66,11 @@ def shot():
     return vision.normalize_brightness(adb.screencap())
 
 
-def step(img, d):
-    """一步 = 一次拖曳，固定方向、固定長度、固定時間。"""
+def step(img, d, px=None):
+    """一步 = 一次拖曳；距離由按住時間決定（px 預設 STEP_PX）。"""
+    px = STEP_PX if px is None else float(px)
     vx, vy = DIRS[d]
-    hold = int(STEP_PX / PPS * 1000)
+    hold = int(px / PPS * 1000)
     a = math.atan2(vy, vx)
     adb.swipe(DRAG[0], DRAG[1],
               int(DRAG[0] + math.cos(a) * DRAG_LEN),
@@ -106,10 +109,29 @@ def rest(rec, img, label):
     return img
 
 
+def step_merge(img, d, px):
+    """一次走完 px（超過 MAX_HOLD_MS 才平均拆段）。回傳累計 shift。"""
+    n = max(1, math.ceil(px / PPS * 1000 / MAX_HOLD_MS))
+    seg = px / n
+    tx = ty = 0.0
+    for _ in range(n):
+        dx, dy, img = step(img, d, seg)
+        tx += dx
+        ty += dy
+    return tx, ty, img
+
+
 def walk(img, steps, rec, label):
-    for i in range(steps):
-        dx, dy, img = step(img, "N")
-        rec({"note": f"{label} 北 {i+1}/{steps}", "shift": [round(dx), round(dy)]})
+    if steps <= 0:
+        return img
+    if not MERGE_NORTH:
+        for i in range(steps):
+            dx, dy, img = step(img, "N")
+            rec({"note": f"{label} 北 {i+1}/{steps}", "shift": [round(dx), round(dy)]})
+        return img
+    px = STEP_PX * steps
+    dx, dy, img = step_merge(img, "N", px)
+    rec({"note": f"{label} 北 {steps} 步合併（{px:.0f}px）", "shift": [round(dx), round(dy)]})
     return img
 
 
@@ -128,9 +150,15 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
+    def north_text(steps):
+        if MERGE_NORTH:
+            px = STEP_PX * steps
+            return f"北 {steps} 步合併（{px:.0f}px → 按住 {px / PPS * 1000:.0f}ms）"
+        return f"北 {steps} 步 × {STEP_PX:.0f}px"
+
     plan = [
-        "傳送小村莊", f"北 {VILLAGE_NORTH} 步", "掃描 L1 N1 R2 S1",
-        "傳送起始之地", f"北 {START_NORTH} 步", "點 (721,1839) 休息", "掃描 L1 N1 R2 S1",
+        "傳送小村莊", north_text(VILLAGE_NORTH), "掃描 L1 N1 R2 S1",
+        "傳送起始之地", north_text(START_NORTH), "點 (721,1839) 休息", "掃描 L1 N1 R2 S1",
         f"等 {args.wait:.0f} 秒",
     ]
     if args.dry_run:
