@@ -40,7 +40,7 @@ REST_TAP = (721, 1839)
 
 # ---- 固定路線 ----
 DRAG = (720, 2600)
-DRAG_LEN = 250
+DRAG_LEN = 400         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（見 SPEED_TABLE；400≈488px/秒）
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
 SETTLE = 0.85          # 手指放開後的緩衝：實測放開→下一次按下 ≈ SETTLE + 0.1 秒
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
@@ -57,6 +57,26 @@ NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 # 若日後短段又出現系統性偏短，先重測再動 STARTUP_MS，不要憑單一筆加補償。
 SPEED = 346.0
 STARTUP_MS = 0
+
+# ---- 搖桿速度表：拖曳長度 → px/秒 ----
+# 遊戲機制（使用者 2026-10-21）：第一次按下的點就是搖桿原點，往外拉越遠走越快。
+# 實測（test_drag.py，按住 800ms、南北成對，每點誤差 ≤2px）：
+#   L=50→50px/s、100→129、150→203、200→280、250→343、300→405、350→453、400→488、450→517、500→541
+# 注意：這是 input swipe（偏移量在按住期間從 0 爬到 L）的平均速度，不是滿舵瞬時速度。
+# 速度只跟拖曳長度有關、跟按住時間無關（L=250 在 800/1500/2803ms 都是 341~349px/s）。
+SPEED_TABLE = [(50, 50.0), (100, 129.0), (150, 203.0), (200, 280.0), (250, 343.0),
+               (300, 405.0), (350, 453.0), (400, 488.0), (450, 517.0), (500, 541.0)]
+
+
+def speed_of(drag_len: float) -> float:
+    """拖曳長度 → px/秒（線性內插，超出表格就夾住）。"""
+    if drag_len <= SPEED_TABLE[0][0]:
+        return SPEED_TABLE[0][1]
+    for (l0, v0), (l1, v1) in zip(SPEED_TABLE, SPEED_TABLE[1:]):
+        if drag_len <= l1:
+            t = (drag_len - l0) / (l1 - l0)
+            return v0 + t * (v1 - v0)
+    return SPEED_TABLE[-1][1]
 
 MAX_HOLD_MS = 3000         # 單次按住上限；超過就平均拆段
 # 按住下限。2026-10-21 實測（test_hold.py，固定起點 (720,2600)、拖曳 250px）：
@@ -100,26 +120,29 @@ def shot():
     return vision.normalize_brightness(adb.screencap())
 
 
-def hold_ms(px: float) -> int:
-    """要走 px 要按住幾毫秒（含起步補償）。"""
-    return int(max(MIN_HOLD_MS, px / SPEED * 1000 + STARTUP_MS))
+def hold_ms(px: float, drag_len: float = None) -> int:
+    """要走 px 要按住幾毫秒（速度由拖曳長度決定）。"""
+    v = speed_of(DRAG_LEN if drag_len is None else drag_len)
+    return int(max(MIN_HOLD_MS, px / v * 1000 + STARTUP_MS))
 
 
-def split_count(px: float) -> int:
+def split_count(px: float, drag_len: float = None) -> int:
     """一段 px 要不要拆。每段各自要付 STARTUP_MS，所以用「扣掉起步後可用時長」換算。"""
+    v = speed_of(DRAG_LEN if drag_len is None else drag_len)
     usable = max(1, MAX_HOLD_MS - STARTUP_MS)
-    return max(1, math.ceil(px / SPEED * 1000 / usable))
+    return max(1, math.ceil(px / v * 1000 / usable))
 
 
-def step(img, d, px=None):
+def step(img, d, px=None, drag_len=None):
     """一步 = 一次拖曳；距離由按住時間決定（px 預設 STEP_PX）。"""
     px = STEP_PX if px is None else float(px)
+    L = DRAG_LEN if drag_len is None else drag_len
     vx, vy = DIRS[d]
-    hold = hold_ms(px)
+    hold = hold_ms(px, L)
     a = math.atan2(vy, vx)
     adb.swipe(DRAG[0], DRAG[1],
-              int(DRAG[0] + math.cos(a) * DRAG_LEN),
-              int(DRAG[1] + math.sin(a) * DRAG_LEN), hold)
+              int(DRAG[0] + math.cos(a) * L),
+              int(DRAG[1] + math.sin(a) * L), hold)
     time.sleep(SETTLE)          # adb swipe 本身已經佔掉 hold 的時間，這裡只需緩衝
     if not MEASURE:
         return 0.0, 0.0, None
@@ -160,18 +183,20 @@ def rest(rec, img, label):
     return shot() if MEASURE else img      # 不量位移就不截圖（省 0.76s）
 
 
-def leg(img, d, px, rec, label):
-    """一個方向走 px（按住時間＝px/SPEED + 起步；超過 MAX_HOLD_MS 就平均拆段）。"""
+def leg(img, d, px, rec, label, drag_len=None):
+    """一個方向走 px（按住時間＝px/速度；超過 MAX_HOLD_MS 就平均拆段）。"""
     if px <= 0:
         return img
-    n = split_count(px)
+    L = DRAG_LEN if drag_len is None else drag_len
+    n = split_count(px, L)
     seg = px / n
     tx = ty = 0.0
     for _ in range(n):
-        dx, dy, img = step(img, d, seg)
+        dx, dy, img = step(img, d, seg, L)
         tx += dx
         ty += dy
-    note = f"{label} {NAMES[d]} {px:.0f}px" + (f"（拆 {n} 段）" if n > 1 else "")
+    note = (f"{label} {NAMES[d]} {px:.0f}px"
+            + (f"（拖 {L:.0f}px／拆 {n} 段）" if n > 1 else f"（拖 {L:.0f}px）"))
     if MEASURE:
         rec({"note": note, "shift": [round(tx), round(ty)],
              "目標": [round(px * DIRS[d][0]), round(px * DIRS[d][1])]})
@@ -192,7 +217,8 @@ def main():
     MEASURE = args.measure
 
     if args.dry_run:
-        print(f"\n里程模型：px = {SPEED:.0f} × (按住秒 − {STARTUP_MS / 1000:.2f})")
+        print(f"\n搖桿：拖 {DRAG_LEN:.0f}px → {speed_of(DRAG_LEN):.0f}px/秒"
+              f"（拖越遠越快；按住毫秒 = px ÷ 速度）")
         for area in ("village", "start"):
             print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")
             for i, act in enumerate(ROUTES[area], 1):

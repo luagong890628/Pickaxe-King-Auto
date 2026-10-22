@@ -44,6 +44,8 @@ def main():
     ap.add_argument("--save", action="store_true", help="另存每段走完的畫面到 captures/")
     ap.add_argument("--template", action="store_true",
                     help="量測只信範本比對（預設是範本＋相位相關交叉驗證，較穩）")
+    ap.add_argument("--drag", type=float, default=None,
+                    help="覆寫拖曳長度＝搖桿速度（250≈343px/秒、400≈488、500≈541）")
     ap.add_argument("--force", action="store_true", help="即使前景不是遊戲也照跑")
     args = ap.parse_args()
 
@@ -54,6 +56,8 @@ def main():
 
     cf.MEASURE = True                     # 這段工具一定要量
     cf.MEASURE_TEMPLATE = args.template
+    if args.drag:
+        cf.DRAG_LEN = args.drag
 
     save_dir = None
     if args.save:
@@ -77,6 +81,9 @@ def main():
             img = cf.rest(rec_plain, img, cf.LABEL[args.area])
         else:
             d, px = act
+            if save_dir is not None and img is not None:
+                small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
+                cv2.imwrite(str(save_dir / f"leg{n:02d}_before.jpg"), small)
             img = cf.leg(img, d, px, rec_plain, f"{cf.LABEL[args.area]}[{n}]")
             if save_dir is not None and img is not None:
                 small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
