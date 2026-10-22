@@ -41,6 +41,9 @@ REST_TAP = (721, 1839)                                  # 帳篷休息對話框�
 # ---- 固定路線 ----
 DRAG = (720, 2600)
 DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（250≈343px/秒）
+ENTRY_DRAG = 500       # 實驗：進林前加速；目標路線 px 不變
+FOREST_DRAG = 170      # 實驗：林內慢走；只換速度，不改停頓
+ENTRY_LEGS = {"village": (1, 2), "start": (1, 3)}  # 起始之地第 2 項是休息
 # 為什麼不是 400（488px/秒）：2026-10-22 交替實測同一 400px 腿，
 #   拖 400 → 395/387/387/392（平均 390、離散 3.9）
 #   拖 250 → 392/397/392/395/395（平均 394、離散 2.0）
@@ -126,6 +129,10 @@ ROUTES = {
     ] + VILLAGE[1:],       # 3 起＝小村莊第 2 段以後
 }
 LABEL = {"village": "小村莊", "start": "起始之地"}
+
+
+def route_drag(area, leg_number):
+    return ENTRY_DRAG if leg_number in ENTRY_LEGS[area] else FOREST_DRAG
 
 # 按住時間校正（2026-10-22 多場實測，固定起點、同方向來回各 5 次）
 #   - 同一場內大致成比例；但**同一條腿跨場次差 3.5%**（800px：771 vs 835）＝每場速度不同，
@@ -246,8 +253,8 @@ def main():
     MEASURE = args.measure
 
     if args.dry_run:
-        print(f"\n搖桿：拖 {DRAG_LEN:.0f}px → {speed_of(DRAG_LEN):.0f}px/秒"
-              f"（拖越遠越快；按住毫秒 = px ÷ 速度）")
+        print(f"\n進場：拖 {ENTRY_DRAG}px → {speed_of(ENTRY_DRAG):.1f}px/秒；"
+              f"林內：拖 {FOREST_DRAG}px → {speed_of(FOREST_DRAG):.1f}px/秒")
         for area in ("village", "start"):
             print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")
             for i, act in enumerate(ROUTES[area], 1):
@@ -255,10 +262,11 @@ def main():
                     print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）")
                     continue
                 d, px = act
-                n = split_count(px)
-                holds = " + ".join(f"{hold_ms(px / n)}" for _ in range(n))
+                drag = route_drag(area, i)
+                n = split_count(px, drag)
+                holds = " + ".join(f"{hold_ms(px / n, drag)}" for _ in range(n))
                 extra = f"（拆 {n} 段）" if n > 1 else ""
-                print(f"  {i}. {NAMES[d]} {px:.0f}px → 按住 {holds}ms{extra}")
+                print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms{extra}")
         print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（補時已含在段間停頓）'}"
               f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
@@ -292,6 +300,7 @@ def main():
                     else:
                         # 前兩段（傳送後、還沒進樹林）固定短停，其餘段吸收補時
                         img = leg(img, act[0], act[1], rec, LABEL[area],
+                                  drag_len=route_drag(area, i),
                                   settle=FIRST_SETTLE if i <= 2 else None)
 
             rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
