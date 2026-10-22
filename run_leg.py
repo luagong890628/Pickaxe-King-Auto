@@ -73,6 +73,9 @@ def main():
     ap.add_argument("--drag", type=float, default=None,
                     help="覆寫拖曳長度＝搖桿速度（250≈343px/秒、400≈488、500≈541）")
     ap.add_argument("--force", action="store_true", help="即使前景不是遊戲也照跑")
+    ap.add_argument("--timing", action="store_true", help="量每段按下的時間與段間間隔（秒）")
+    ap.add_argument("--no-measure", action="store_true",
+                    help="不量位移（＝長跑時的真實節奏；段間間隔會回到 ~1 秒）")
     args = ap.parse_args()
 
     if not args.legs and not args.walk:
@@ -84,10 +87,21 @@ def main():
         print(f"前景不是遊戲，中止：{focus}")
         return 2
 
-    cf.MEASURE = True                     # 這段工具一定要量
+    cf.MEASURE = not args.no_measure      # 預設要量；--no-measure 用來看長跑節奏
     cf.MEASURE_TEMPLATE = args.template
     if args.drag:
         cf.DRAG_LEN = args.drag
+
+    presses = []
+    if args.timing:
+        orig_swipe = cf.adb.swipe
+
+        def timed_swipe(x1, y1, x2, y2, ms=300):
+            t0 = time.time()
+            orig_swipe(x1, y1, x2, y2, ms)
+            presses.append((t0, time.time(), ms))
+
+        cf.adb.swipe = timed_swipe
 
     save_dir = None
     if args.save:
@@ -140,6 +154,12 @@ def main():
 
     if save_dir is not None:
         print(f"畫面存到 {save_dir}")
+    if args.timing and presses:
+        print("\n按下時刻      按住ms   段間間隔（上一次放開→這一次按下）")
+        t_base = presses[0][0]
+        for i, (t0, t1, ms) in enumerate(presses):
+            gap = "—" if i == 0 else f"{t0 - presses[i - 1][1]:.2f}s"
+            print(f"{t0 - t_base:8.2f}s  {ms:>7}   {gap:>8}（按住實測 {t1 - t0:.2f}s）")
     return 0
 
 
