@@ -40,7 +40,11 @@ REST_TAP = (721, 1839)
 
 # ---- 固定路線 ----
 DRAG = (720, 2600)
-DRAG_LEN = 400         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（見 SPEED_TABLE；400≈488px/秒）
+DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（250≈343px/秒）
+# 為什麼不是 400（488px/秒）：2026-10-22 交替實測同一 400px 腿，
+#   拖 400 → 395/387/387/392（平均 390、離散 3.9）
+#   拖 250 → 392/397/392/395/395（平均 394、離散 2.0）
+# 慢一點＝同樣 20ms 抖動只差 7px（vs 10px），精度更好；代價是路線總時長約 +40%。
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
 SETTLE = 0.85          # 手指放開後的緩衝：實測放開→下一次按下 ≈ SETTLE + 0.1 秒
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
@@ -123,6 +127,16 @@ LABEL = {"village": "小村莊", "start": "起始之地"}
 
 MENU_BG = (255, 211, 143)      # 傳送選單底色（BGR），用來確認選單有沒有關掉
 
+# 按住時間校正（2026-10-22 多場實測，固定起點、同方向來回各 5 次）
+#   - 同一場內大致成比例；但**同一條腿跨場次差 3.5%**（800px：771 vs 835）＝每場速度不同，
+#     這是「每次走出來不太一樣」的主因，靜態係數消不掉（隨機抖動只有 0~9px/段）。
+#   - 靜態平均：名目 400px 實走 394（-1.5%）、800px→780（-2.5%）、150~250px→+1~2%。
+#     統一取 -1.5% 中間值補正（不對長度做分段特例）。
+#   - 已試過「每場探針校正」（南北各走固定毫秒、量位移解 a,b）：南向量測不可信
+#     （牛隻動畫干擾，1800ms 探針量成 -122px）→ 移除，不要重做。
+PX_OFFSET = 0.0
+TIME_SCALE = 1.0        # 不做靜態補正：跨場次變異 ±3% 比靜態偏差大，補了反而在快場次偏長
+
 
 def menu_still_open(img):
     import numpy as np
@@ -136,9 +150,10 @@ def shot():
 
 
 def hold_ms(px: float, drag_len: float = None) -> int:
-    """要走 px 要按住幾毫秒（速度由拖曳長度決定）。"""
+    """要走 px 要按住幾毫秒（速度由拖曳長度決定；PX_OFFSET／TIME_SCALE 抵掉實測偏差）。"""
     v = speed_of(DRAG_LEN if drag_len is None else drag_len)
-    return int(max(MIN_HOLD_MS, px / v * 1000 + STARTUP_MS))
+    nominal = max(0.0, px - PX_OFFSET) * TIME_SCALE
+    return int(max(MIN_HOLD_MS, nominal / v * 1000 + STARTUP_MS))
 
 
 def split_count(px: float, drag_len: float = None) -> int:
