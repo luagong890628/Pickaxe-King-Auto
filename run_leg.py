@@ -67,6 +67,8 @@ def main():
                     help="臨時段『方向:px』（例 --walk L:100）；從現在位置走、不傳送，可重複")
     ap.add_argument("--no-teleport", action="store_true")
     ap.add_argument("--settle", type=float, default=1.0, help="段與段之間停多久")
+    ap.add_argument("--settle-first", type=float, default=None,
+                    help="第 1 段走完後改停這麼久（預設同 --settle）；其餘段仍用 --settle")
     ap.add_argument("--save", action="store_true", help="另存每段前後的畫面到 captures/")
     ap.add_argument("--template", action="store_true",
                     help="量測只信範本比對（預設是範本＋相位相關交叉驗證，較穩）")
@@ -125,11 +127,17 @@ def main():
         cf.teleport(args.area, rec_plain)
         time.sleep(2.5)
 
-    img = cf.shot()
+    def settle_for(n):
+        """第 1 段走完後用 --settle-first（若給），其餘段用 --settle。"""
+        if n == 1 and args.settle_first is not None:
+            return args.settle_first
+        return args.settle
+
+    img = cf.shot() if cf.MEASURE else None
     for n, act in enumerate(acts, 1):
         if act[0] == "REST":
             img = cf.rest(rec_plain, img, cf.LABEL[args.area])
-            time.sleep(args.settle)
+            time.sleep(settle_for(n))
             continue
         d, px = act
         if save_dir is not None and img is not None:
@@ -137,7 +145,7 @@ def main():
             cv2.imwrite(str(save_dir / f"leg{n:02d}_before.jpg"), small)
         before = img
         img = cf.leg(img, d, px, rec_plain, f"{cf.LABEL[args.area]}[{n}]")
-        if before is not None and img is not None:
+        if cf.MEASURE and before is not None and img is not None:
             m = measure.world_shift(before, img)
             if m:
                 rec = {"dir": d, "px": px, "measured": [round(m[0]), round(m[1])],
@@ -150,7 +158,7 @@ def main():
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{n:02d}_after.jpg"), small)
-        time.sleep(args.settle)
+        time.sleep(settle_for(n))
 
     if save_dir is not None:
         print(f"畫面存到 {save_dir}")
