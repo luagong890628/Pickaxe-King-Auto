@@ -228,7 +228,8 @@ def leg(img, d, px, rec, label, drag_len=None, settle=None):
 def main():
     global MEASURE
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", type=float, default=240)
+    ap.add_argument("--minutes", type=float, default=None,
+                    help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
     ap.add_argument("--wait", type=float, default=0,
                     help="每輪之間額外等幾秒（預設 0：補時已平攤到段間停頓）")
     ap.add_argument("--dry-run", action="store_true")
@@ -267,31 +268,35 @@ def main():
 
     rec({"note": "開始", "wait": args.wait, "分鐘": args.minutes})
     t0 = time.time()
-    deadline = t0 + args.minutes * 60
+    deadline = float("inf") if args.minutes is None else t0 + args.minutes * 60
     cycles = 0
 
-    while time.time() < deadline:
-        cycles += 1
-        rec({"note": f"=== 第 {cycles} 輪 ==="})
+    try:
+        while time.time() < deadline:
+            cycles += 1
+            rec({"note": f"=== 第 {cycles} 輪 ==="})
 
-        for area in ("village", "start"):
-            teleport(area, rec)
-            img = shot() if MEASURE else None
-            for i, act in enumerate(ROUTES[area], 1):
-                if act[0] == "REST":
-                    img = rest(rec, img, LABEL[area])
-                else:
-                    # 前兩段（傳送後、還沒進樹林）固定短停，其餘段吸收補時
-                    img = leg(img, act[0], act[1], rec, LABEL[area],
-                              settle=FIRST_SETTLE if i <= 2 else None)
+            for area in ("village", "start"):
+                teleport(area, rec)
+                img = shot() if MEASURE else None
+                for i, act in enumerate(ROUTES[area], 1):
+                    if act[0] == "REST":
+                        img = rest(rec, img, LABEL[area])
+                    else:
+                        # 前兩段（傳送後、還沒進樹林）固定短停，其餘段吸收補時
+                        img = leg(img, act[0], act[1], rec, LABEL[area],
+                                  settle=FIRST_SETTLE if i <= 2 else None)
 
-        rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
-        end = min(time.time() + args.wait, deadline)
-        while time.time() < end:
-            time.sleep(min(2, end - time.time()))
+            rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
+            end = min(time.time() + args.wait, deadline)
+            while time.time() < end:
+                time.sleep(min(2, end - time.time()))
 
-    rec({"note": "收工", "cycles": cycles, "小時": round((time.time() - t0) / 3600, 2)})
-    log.close()
+    except KeyboardInterrupt:
+        rec({"note": "使用者停止（Ctrl+C）"})
+    finally:
+        rec({"note": "收工", "cycles": cycles, "小時": round((time.time() - t0) / 3600, 2)})
+        log.close()
 
 
 if __name__ == "__main__":

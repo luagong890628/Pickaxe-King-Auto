@@ -11,7 +11,7 @@ if errorlevel 1 goto no_deps
 
 echo Pickaxe King Auto
 echo.
-echo Route: village, then start area, then rest, then wait 30s, repeat.
+echo Runs continuously until you press Ctrl+C in this window.
 echo Phone must be connected and the game must be open.
 echo Press Ctrl+C to stop.
 echo.

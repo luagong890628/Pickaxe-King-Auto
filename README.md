@@ -33,7 +33,9 @@
 
 ## 執行
 
-**雙擊 `start_auto.bat` 就開始跑**（手機插著、遊戲開著即可）。停止：在視窗按 Ctrl+C。
+**雙擊 `start_auto.bat` 就開始無限循環**（手機插著、遊戲開著即可），不再預設四小時結束。
+停止：先點選執行視窗，再按 Ctrl+C，程式會中止當前流程並關閉 log，不必等整輪跑完。
+若 CMD 詢問是否終止批次工作，輸入 Y 再按 Enter。
 
 ```bash
 P=./.venv/Scripts/python.exe
