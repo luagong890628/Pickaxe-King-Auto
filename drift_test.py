@@ -5,8 +5,7 @@
 整趟淨位移只取兩張圖（起點、終點），位移大、共同特徵多，並印出分數與來源供判讀。
 
 用法
-    python drift_test.py --runs 3                # 預設小村莊、照目前 TIME_SCALE
-    python drift_test.py --runs 3 --no-scale     # 暫時關掉 TIME_SCALE 做對照
+    python drift_test.py --runs 3                # 預設小村莊
     python drift_test.py --area start --runs 2
 """
 from __future__ import annotations
@@ -35,16 +34,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--area", default="village", choices=sorted(cf.ROUTES))
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--no-scale", action="store_true", help="關掉 TIME_SCALE（對照組）")
     ap.add_argument("--settle", type=float, default=1.0)
     ap.add_argument("--settle-first", type=float, default=0.5)
     args = ap.parse_args()
 
-    if args.no_scale:
-        cf.TIME_SCALE = 1.0
     ex, ey = expected_shift(args.area)
-    print(f"[{cf.LABEL[args.area]}] 理論淨位移 ({ex:+.0f},{ey:+.0f})"
-          f"　TIME_SCALE={cf.TIME_SCALE:.4f}", flush=True)
+    print(f"[{cf.LABEL[args.area]}] 理論淨位移 ({ex:+.0f},{ey:+.0f})", flush=True)
 
     rows = []
     for i in range(1, args.runs + 1):

@@ -35,8 +35,8 @@ HEART = (1340, 1670)
 MENU_SCROLL_FROM = (720, 2600)
 MENU_SCROLL_TO = (720, 1900)      # 700px 長滑（原 250px）：確保列表滑到底
 MENU_SCROLL_MS = 600
-TILE = {"village": (330, 1464), "start": (720, 1434)}
-REST_TAP = (721, 1839)
+TILE = {"village": (330, 1464), "start": (720, 1434)}   # 選單裡兩區的固定格子座標
+REST_TAP = (721, 1839)                                  # 帳篷休息對話框中心
 
 # ---- 固定路線 ----
 DRAG = (720, 2600)
@@ -127,24 +127,13 @@ ROUTES = {
 }
 LABEL = {"village": "小村莊", "start": "起始之地"}
 
-MENU_BG = (255, 211, 143)      # 傳送選單底色（BGR），用來確認選單有沒有關掉
-
 # 按住時間校正（2026-10-22 多場實測，固定起點、同方向來回各 5 次）
 #   - 同一場內大致成比例；但**同一條腿跨場次差 3.5%**（800px：771 vs 835）＝每場速度不同，
 #     這是「每次走出來不太一樣」的主因，靜態係數消不掉（隨機抖動只有 0~9px/段）。
 #   - 靜態平均：名目 400px 實走 394（-1.5%）、800px→780（-2.5%）、150~250px→+1~2%。
-#     統一取 -1.5% 中間值補正（不對長度做分段特例）。
-#   - 已試過「每場探針校正」（南北各走固定毫秒、量位移解 a,b）：南向量測不可信
-#     （牛隻動畫干擾，1800ms 探針量成 -122px）→ 移除，不要重做。
-PX_OFFSET = 0.0
-TIME_SCALE = 1.0        # 不做靜態補正：跨場次變異 ±3% 比靜態偏差大，補了反而在快場次偏長
+#     **刻意不加靜態補正**：平均偏差只有 1.5%，補了在快場次反而多走 3%（實測 400 指令→416）。
+#   - 已試過「每場探針校正」：南向量測被牛動畫干擾（1800ms 量成 -122px）→ 不可行，不要重做。
 
-
-def menu_still_open(img):
-    import numpy as np
-    bg = np.array(MENU_BG)
-    mid = img[560:2840, 60:1380]
-    return float((np.abs(mid.astype(np.int16) - bg).max(axis=2) < 45).mean()) > 0.10
 
 
 def shot():
@@ -152,10 +141,9 @@ def shot():
 
 
 def hold_ms(px: float, drag_len: float = None) -> int:
-    """要走 px 要按住幾毫秒（速度由拖曳長度決定；PX_OFFSET／TIME_SCALE 抵掉實測偏差）。"""
+    """要走 px 要按住幾毫秒（速度由拖曳長度決定）。"""
     v = speed_of(DRAG_LEN if drag_len is None else drag_len)
-    nominal = max(0.0, px - PX_OFFSET) * TIME_SCALE
-    return int(max(MIN_HOLD_MS, nominal / v * 1000 + STARTUP_MS))
+    return int(max(MIN_HOLD_MS, px / v * 1000 + STARTUP_MS))
 
 
 def split_count(px: float, drag_len: float = None) -> int:
@@ -241,7 +229,8 @@ def main():
     global MEASURE
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=240)
-    ap.add_argument("--wait", type=float, default=30)
+    ap.add_argument("--wait", type=float, default=0,
+                    help="每輪之間額外等幾秒（預設 0：補時已平攤到段間停頓）")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--measure", action="store_true",
                     help="每段量實際位移（每段多花約 0.8 秒截圖；調 px 時用）")
@@ -262,7 +251,8 @@ def main():
                 holds = " + ".join(f"{hold_ms(px / n)}" for _ in range(n))
                 extra = f"（拆 {n} 段）" if n > 1 else ""
                 print(f"  {i}. {NAMES[d]} {px:.0f}px → 按住 {holds}ms{extra}")
-        print(f"\n等 {args.wait:.0f} 秒後下一輪　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
+        print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（補時已含在段間停頓）'}"
+              f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
 
     run = Path("captures") / time.strftime("fixed_%Y%m%d_%H%M%S")
