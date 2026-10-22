@@ -38,9 +38,13 @@ def screen_size() -> tuple[int, int]:
 
 
 def _run(args, timeout=30):
-    return subprocess.run(
+    result = subprocess.run(
         [adb_path(), *args], capture_output=True, timeout=timeout
     )
+    if result.returncode:
+        reason = result.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(f"ADB 指令失敗（{result.returncode}）：{reason}")
+    return result
 
 
 def screencap() -> np.ndarray:

@@ -25,7 +25,7 @@ from pathlib import Path
 import cv2
 
 import cycle_fixed as cf
-from pkauto import adb, measure
+from pkauto import adb
 
 TUNE_LOG = Path("data/tune_log.jsonl")
 
@@ -134,6 +134,17 @@ def main():
         return args.settle
 
     img = cf.shot() if cf.MEASURE else None
+    def rec_leg(o):
+        rec_plain(o)
+        if "source" in o:
+            rec = {"dir": d, "px": px, "measured": [-v for v in o["shift"]],
+                   "source": o["source"], "score": round(o["score"], 2),
+                   "drag": cf.DRAG_LEN, "area": args.area,
+                   "t": time.strftime("%Y-%m-%d %H:%M:%S")}
+            log_walk(rec)
+            print(f"    紀錄：{d} {px:.0f}px → 實走 ({rec['measured'][0]:+d},"
+                  f"{rec['measured'][1]:+d}) [{rec['source']} {rec['score']}]", flush=True)
+
     for n, act in enumerate(acts, 1):
         if act[0] == "REST":
             img = cf.rest(rec_plain, img, cf.LABEL[args.area])
@@ -143,23 +154,11 @@ def main():
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{n:02d}_before.jpg"), small)
-        before = img
-        img = cf.leg(img, d, px, rec_plain, f"{cf.LABEL[args.area]}[{n}]")
-        if cf.MEASURE and before is not None and img is not None:
-            m = measure.world_shift(before, img)
-            if m:
-                rec = {"dir": d, "px": px, "measured": [round(m[0]), round(m[1])],
-                       "source": m[3], "score": round(m[2], 2),
-                       "drag": cf.DRAG_LEN, "area": args.area,
-                       "t": time.strftime("%Y-%m-%d %H:%M:%S")}
-                log_walk(rec)
-                print(f"    紀錄：{d} {px:.0f}px → 實走 ({rec['measured'][0]:+d},"
-                      f"{rec['measured'][1]:+d}) [{rec['source']} {rec['score']}]", flush=True)
+        img = cf.leg(img, d, px, rec_leg, f"{cf.LABEL[args.area]}[{n}]",
+                     settle=settle_for(n))
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{n:02d}_after.jpg"), small)
-        time.sleep(settle_for(n))
-
     if save_dir is not None:
         print(f"畫面存到 {save_dir}")
     if args.timing and presses:

@@ -47,11 +47,13 @@ def main() -> int:
         time.sleep(2.5)
         a = cf.shot()
         for n, act in enumerate(cf.ROUTES[args.area], 1):
+            settle = args.settle_first if n == 1 else args.settle
             if act[0] == "REST":
                 cf.rest(lambda o: None, None, cf.LABEL[args.area])
+                time.sleep(settle)
             else:
-                cf.leg(None, act[0], act[1], lambda o: None, f"{cf.LABEL[args.area]}[{n}]")
-            time.sleep(args.settle_first if n == 1 else args.settle)
+                cf.leg(None, act[0], act[1], lambda o: None, f"{cf.LABEL[args.area]}[{n}]",
+                       settle=settle)
         time.sleep(1.2)
         b = cf.shot()
         m = measure.world_shift(a, b)          # (角色dx, 角色dy, 分數, 來源)

@@ -165,16 +165,16 @@ def step(img, d, px=None, drag_len=None, settle=None):
               int(DRAG[1] + math.sin(a) * L), hold)
     time.sleep(SETTLE if settle is None else settle)
     if not MEASURE:
-        return 0.0, 0.0, None
+        return 0.0, 0.0, None, None
     cur = shot()
     if MEASURE_TEMPLATE:                        # 只信範本（舊行為，重複性地形會鎖錯位置）
         sh = vision.shift_by_template(img, cur, threshold=0.6)
-        return (-sh[0], -sh[1], cur) if sh else (0.0, 0.0, cur)
+        return (sh[0], sh[1], cur, (sh[2], "template")) if sh else (0.0, 0.0, cur, None)
     # 預設：範本＋相位相關交叉驗證（只見 pkauto/measure.py），回傳仍用「畫面位移」的正負號
     m = measure.world_shift(img, cur)           # (角色dx, 角色dy, 分數, 來源)
     if m:
-        return -m[0], -m[1], cur
-    return 0.0, 0.0, cur
+        return -m[0], -m[1], cur, (m[2], m[3])
+    return 0.0, 0.0, cur, None
 
 
 def teleport(area, rec):
@@ -211,15 +211,22 @@ def leg(img, d, px, rec, label, drag_len=None, settle=None):
     n = split_count(px, L)
     seg = px / n
     tx = ty = 0.0
+    measurements = []
     for _ in range(n):
-        dx, dy, img = step(img, d, seg, L, settle)
+        dx, dy, img, measured = step(img, d, seg, L, settle)
         tx += dx
         ty += dy
+        if measured is not None:
+            measurements.append(measured)
     note = (f"{label} {NAMES[d]} {px:.0f}px"
             + (f"（拖 {L:.0f}px／拆 {n} 段）" if n > 1 else f"（拖 {L:.0f}px）"))
     if MEASURE:
-        rec({"note": note, "shift": [round(tx), round(ty)],
-             "目標": [round(px * DIRS[d][0]), round(px * DIRS[d][1])]})
+        result = {"note": note, "shift": [round(tx), round(ty)],
+                  "目標": [round(px * DIRS[d][0]), round(px * DIRS[d][1])]}
+        if len(measurements) == n:
+            result["score"] = min(m[0] for m in measurements)
+            result["source"] = "+".join(dict.fromkeys(m[1] for m in measurements))
+        rec(result)
     else:
         rec({"note": note})
     return img
