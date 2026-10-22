@@ -27,7 +27,7 @@ import math
 import time
 from pathlib import Path
 
-from pkauto import adb, vision
+from pkauto import adb, measure, vision
 
 # ---- 固定座標 ----
 HEART = (1340, 1670)
@@ -59,7 +59,11 @@ SPEED = 346.0
 STARTUP_MS = 0
 
 MAX_HOLD_MS = 3000         # 單次按住上限；超過就平均拆段
-MIN_HOLD_MS = 500          # 按住下限：短於此遊戲會判成「點擊」（誤開商店/訓練場）
+# 按住下限。2026-10-21 實測（test_hold.py，固定起點 (720,2600)、拖曳 250px）：
+#   500ms→173px、300→112、250→96、200→80、150→51、120→37、100→37、80→24、60→13、40→8、20→0~11
+# 也就是**只要拖曳就算移動，沒有「被判成點擊」的門檻**（位移縮到量測解析度內為止）；
+# 而且 500ms 會把任何 <173px 的 px 偷偷放大成 173px。取 150ms（≈52px）當下限。
+MIN_HOLD_MS = 150
 
 # ---- 路線（照順序走；每項是 (方向, px)，("REST",) = 點固定座標休息）----
 # 要調走路只改這裡；一段一個方向，距離直接用 px。
@@ -120,13 +124,13 @@ def step(img, d, px=None):
     if not MEASURE:
         return 0.0, 0.0, None
     cur = shot()
-    if not MEASURE_TEMPLATE:
-        dx, dy, resp = vision.scroll(img, cur)  # 0.05s；範本比對要 0.8s，會拖慢兩步間隔
-        if resp >= 0.35:                        # 相位相關可信就直接用
-            return dx, dy, cur
-    sh = vision.shift_by_template(img, cur, threshold=0.6)
-    if sh:
-        return sh[0], sh[1], cur
+    if MEASURE_TEMPLATE:                        # 只信範本（舊行為，重複性地形會鎖錯位置）
+        sh = vision.shift_by_template(img, cur, threshold=0.6)
+        return (-sh[0], -sh[1], cur) if sh else (0.0, 0.0, cur)
+    # 預設：範本＋相位相關交叉驗證（只見 pkauto/measure.py），回傳仍用「畫面位移」的正負號
+    m = measure.world_shift(img, cur)           # (角色dx, 角色dy, 分數, 來源)
+    if m:
+        return -m[0], -m[1], cur
     return 0.0, 0.0, cur
 
 

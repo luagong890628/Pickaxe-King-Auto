@@ -43,7 +43,7 @@ def main():
     ap.add_argument("--settle", type=float, default=1.0, help="段與段之間停多久")
     ap.add_argument("--save", action="store_true", help="另存每段走完的畫面到 captures/")
     ap.add_argument("--template", action="store_true",
-                    help="量測一律用範本比對（走動中比相位相關可靠，但每段多 0.8 秒）")
+                    help="量測只信範本比對（預設是範本＋相位相關交叉驗證，較穩）")
     ap.add_argument("--force", action="store_true", help="即使前景不是遊戲也照跑")
     args = ap.parse_args()
 
