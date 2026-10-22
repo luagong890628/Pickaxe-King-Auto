@@ -33,8 +33,8 @@ from pkauto import adb, measure, vision
 HEART = (1340, 1670)
 # 手指往上滑（內容往上）：避免之後上方新增地區時格子位置被推走
 MENU_SCROLL_FROM = (720, 2600)
-MENU_SCROLL_TO = (720, 2350)
-MENU_SCROLL_MS = 500
+MENU_SCROLL_TO = (720, 1900)      # 700px 長滑（原 250px）：確保列表滑到底
+MENU_SCROLL_MS = 600
 TILE = {"village": (330, 1464), "start": (720, 1434)}
 REST_TAP = (721, 1839)
 
@@ -188,19 +188,19 @@ def step(img, d, px=None, drag_len=None):
 
 
 def teleport(area, rec):
-    """機械化傳送：點愛心 → 滑選單 → 點格子。"""
+    """機械化傳送：點愛心 → 滑選單確保列表在底部 → 點格子。
+
+    2026-10-23 實測：選單在「已經在最底部」的狀態下滑不動（screenrecord 175 格、位移 0），
+    所以這一下滑動是**保險**（若哪天列表被推上去就滑回底部），不是每輪都會看到位移。
+    使用者要求保留並滑多一點（250→700px、500→600ms）。
+    """
     adb.tap(*HEART)
-    time.sleep(2.2)
-    adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)   # 手指往上＝內容往上（上方擴增不影響）
+    time.sleep(1.0)
+    adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
     time.sleep(1.3)
     adb.tap(*TILE[area])
-    time.sleep(2.6)
-    opened = menu_still_open(shot())
-    rec({"note": f"傳送 {area}", "選單還開著": opened})
-    if opened:                      # 點歪了：再點一次同一個固定位置
-        adb.tap(*TILE[area])
-        time.sleep(3.0)
-        rec({"note": f"傳送 {area} 重試", "選單還開著": menu_still_open(shot())})
+    time.sleep(1.0)
+    rec({"note": f"傳送 {area}"})
 
 
 REST_WAIT = 3.2          # 點擊休息後等動畫（原本 4.5 秒太長，實測 3 秒就結束）
