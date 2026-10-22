@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # 讓 scripts/ 底下也 import 得到專案模組
 import cycle_fixed as cf
 from pkauto import adb
 
