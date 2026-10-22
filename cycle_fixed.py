@@ -46,9 +46,9 @@ DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（2
 #   拖 250 → 392/397/392/395/395（平均 394、離散 2.0）
 # 慢一點＝同樣 20ms 抖動只差 7px（vs 10px），精度更好；代價是路線總時長約 +40%。
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
-SETTLE = 2.0           # 手指放開後的緩衝：實測放開→下一次按下 ≈ SETTLE + 0.1 秒
-# 2026-10-23 使用者定案：不把補時放在每輪最後，改用「段與段之間多停」補到 ~110-115 秒/輪
-#（38 段 × 2.0 秒 ≈ 76 秒，加走路與傳送約 112 秒；樹 100 秒重生，剛好繞回來）
+SETTLE = 2.15          # 樹林內段與段之間的停頓（吸收補時，讓一輪 ≈112 秒）
+FIRST_SETTLE = 0.5     # 傳送後前兩段（還沒進樹林的路）只停 0.5 秒，不佔補時
+# 2026-10-23 使用者定案：補時只分攤在「待在樹林裡」的段；進林前的路徑固定 0.5 秒。
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
 MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
@@ -153,7 +153,7 @@ def split_count(px: float, drag_len: float = None) -> int:
     return max(1, math.ceil(px / v * 1000 / usable))
 
 
-def step(img, d, px=None, drag_len=None):
+def step(img, d, px=None, drag_len=None, settle=None):
     """一步 = 一次拖曳；距離由按住時間決定（px 預設 STEP_PX）。"""
     px = STEP_PX if px is None else float(px)
     L = DRAG_LEN if drag_len is None else drag_len
@@ -163,7 +163,7 @@ def step(img, d, px=None, drag_len=None):
     adb.swipe(DRAG[0], DRAG[1],
               int(DRAG[0] + math.cos(a) * L),
               int(DRAG[1] + math.sin(a) * L), hold)
-    time.sleep(SETTLE)          # adb swipe 本身已經佔掉 hold 的時間，這裡只需緩衝
+    time.sleep(SETTLE if settle is None else settle)
     if not MEASURE:
         return 0.0, 0.0, None
     cur = shot()
@@ -203,7 +203,7 @@ def rest(rec, img, label):
     return shot() if MEASURE else img      # 不量位移就不截圖（省 0.76s）
 
 
-def leg(img, d, px, rec, label, drag_len=None):
+def leg(img, d, px, rec, label, drag_len=None, settle=None):
     """一個方向走 px（按住時間＝px/速度；超過 MAX_HOLD_MS 就平均拆段）。"""
     if px <= 0:
         return img
@@ -212,7 +212,7 @@ def leg(img, d, px, rec, label, drag_len=None):
     seg = px / n
     tx = ty = 0.0
     for _ in range(n):
-        dx, dy, img = step(img, d, seg, L)
+        dx, dy, img = step(img, d, seg, L, settle)
         tx += dx
         ty += dy
     note = (f"{label} {NAMES[d]} {px:.0f}px"
@@ -277,11 +277,13 @@ def main():
         for area in ("village", "start"):
             teleport(area, rec)
             img = shot() if MEASURE else None
-            for act in ROUTES[area]:
+            for i, act in enumerate(ROUTES[area], 1):
                 if act[0] == "REST":
                     img = rest(rec, img, LABEL[area])
                 else:
-                    img = leg(img, act[0], act[1], rec, LABEL[area])
+                    # 前兩段（傳送後、還沒進樹林）固定短停，其餘段吸收補時
+                    img = leg(img, act[0], act[1], rec, LABEL[area],
+                              settle=FIRST_SETTLE if i <= 2 else None)
 
         rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
         end = min(time.time() + args.wait, deadline)
