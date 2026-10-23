@@ -37,17 +37,19 @@ goto check
 
 :check
 set "ONLINE=0"
-set "ONLINE_SERIAL="
+set "TARGET="
 for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do (
   if "%%b"=="device" (
     set /a ONLINE+=1
-    set "ONLINE_SERIAL=%%a"
+    if not defined TARGET set "TARGET=%%a"
+    if /i "%%a"=="%SERIAL%" set "TARGET=%%a"
   )
 )
 if %ONLINE%==0 goto no_device
-if %ONLINE% GTR 1 goto too_many
+if %ONLINE% GTR 1 echo Note: %ONLINE% adb entries for this phone, using %TARGET%
 
-echo Connected: %ONLINE_SERIAL%
+echo Connected: %TARGET%
+set "ANDROID_SERIAL=%TARGET%"
 echo.
 echo Open the game on the phone now.
 echo Press Enter to start Pickaxe-King-Auto...
@@ -67,14 +69,6 @@ echo.
 echo No device found.
 echo Wi-Fi: check Wireless debugging and the port.
 echo USB: check the cable and allow USB debugging on the phone.
-echo Press Enter to close
-set /p "_="
-exit /b 1
-
-:too_many
-echo.
-echo More than one device is connected.
-echo Unplug USB or disconnect the other device, then run again.
 echo Press Enter to close
 set /p "_="
 exit /b 1
