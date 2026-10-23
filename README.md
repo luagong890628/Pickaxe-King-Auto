@@ -33,7 +33,7 @@
 
 ## 執行
 
-**雙擊 `Pickaxe-King-Auto_wire.bat`（USB）或 `Pickaxe-King-Auto_wifi.bat`（無線，輸入無線偵錯埠號、按 Enter 才啟動）就開始無限循環**（遊戲開著即可），不再預設四小時結束。
+**雙擊 `Pickaxe-King-Auto.bat`：輸入 `1` 走無線（再輸入無線偵錯埠號）、輸入 `2` 走 USB，按 Enter 才啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
 停止：先點選執行視窗，再按 Ctrl+C，程式會中止當前流程並關閉 log，不必等整輪跑完。
 若 CMD 詢問是否終止批次工作，輸入 Y 再按 Enter。
 

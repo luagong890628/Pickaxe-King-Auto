@@ -8,22 +8,34 @@ set "PY=%~dp0.venv\Scripts\python.exe"
 
 if not exist "%PY%" goto no_python
 
-echo Pickaxe King Auto (Wi-Fi)
+echo Pickaxe King Auto
 echo.
-echo Phone IP: %PHONE%
-echo Edit PHONE in this BAT if the phone IP changes.
-echo Turn on Wireless debugging on the phone, then type its port.
+echo   1) Wi-Fi  (type the wireless-debugging port)
+echo   2) USB    (cable connected)
+echo.
+echo Wi-Fi phone IP: %PHONE%
+echo Edit PHONE in this BAT if it changes.
 echo.
 
+:ask_mode
+set "MODE="
+set /p "MODE=Choose 1 or 2: "
+if "%MODE%"=="1" goto wifi
+if "%MODE%"=="2" goto check
+goto ask_mode
+
+:wifi
+echo.
+echo Turn on Wireless debugging on the phone, then type its port.
 :ask_port
 set "PORT="
 set /p "PORT=Port: "
 if "%PORT%"=="" goto ask_port
-set "SERIAL=%PHONE%:%PORT%"
-
 echo.
-"%ADB%" connect %SERIAL%
+"%ADB%" connect %PHONE%:%PORT%
+goto check
 
+:check
 set "ONLINE=0"
 set "ONLINE_SERIAL="
 for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do (
@@ -32,7 +44,7 @@ for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do (
     set "ONLINE_SERIAL=%%a"
   )
 )
-if %ONLINE%==0 goto connect_failed
+if %ONLINE%==0 goto no_device
 if %ONLINE% GTR 1 goto too_many
 
 echo Connected: %ONLINE_SERIAL%
@@ -50,10 +62,11 @@ echo Press Enter to close
 set /p "_="
 exit /b %RC%
 
-:connect_failed
+:no_device
 echo.
-echo Connect failed: %SERIAL%
-echo Check that Wireless debugging is on and the port is correct.
+echo No device found.
+echo Wi-Fi: check Wireless debugging and the port.
+echo USB: check the cable and allow USB debugging on the phone.
 echo Press Enter to close
 set /p "_="
 exit /b 1
