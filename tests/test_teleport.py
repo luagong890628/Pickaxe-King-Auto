@@ -13,9 +13,9 @@ class TeleportTest(unittest.TestCase):
                       patch.object(cf.adb, 'swipe', side_effect=lambda *a: events.append(('swipe', a))),
                       patch.object(cf.time, 'sleep', side_effect=lambda s: events.append(('wait', s)))):
                     cf.teleport(area, lambda o: None)
-                self.assertEqual(events, [('tap', cf.HEART), ('wait', 1.0),
-                    ('swipe', (720, 850, 720, 2250, 300)), ('wait', 2.0),
-                    ('tap', tile), ('wait', 1.0)])
+                self.assertEqual(events, [('tap', cf.HEART), ('wait', 0.5),
+                    ('swipe', (720, 850, 720, 2250, 300)), ('wait', 0.5),
+                    ('tap', tile), ('wait', 0.5)])
 
 
 if __name__ == '__main__':

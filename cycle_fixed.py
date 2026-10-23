@@ -184,13 +184,13 @@ def step(img, d, px=None, drag_len=None, settle=None):
 
 
 def teleport(area, rec):
-    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等2秒 → 點固定格子。"""
+    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等0.5秒 → 點固定格子。"""
     adb.tap(*HEART)
-    time.sleep(1.0)
+    time.sleep(0.5)
     adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
-    time.sleep(2.0)
+    time.sleep(0.5)
     adb.tap(*TILE[area])
-    time.sleep(1.0)
+    time.sleep(0.5)
     rec({"note": f"傳送 {area}"})
 
 
