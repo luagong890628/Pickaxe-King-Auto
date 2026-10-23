@@ -19,11 +19,11 @@ from pkauto import adb, measure, vision
 
 # ---- 固定座標 ----
 HEART = (1340, 1670)
-# 手指往上滑（內容往上）：避免之後上方新增地區時格子位置被推走
-MENU_SCROLL_FROM = (720, 2600)
-MENU_SCROLL_TO = (720, 1900)      # 700px 長滑（原 250px）：確保列表滑到底
-MENU_SCROLL_MS = 600
-TILE = {"village": (330, 1464), "start": (720, 1434)}   # 選單裡兩區的固定格子座標
+# 手指向下快速拖曳，將目的地列表歸頂；座標已由使用者確認
+MENU_SCROLL_FROM = (720, 850)
+MENU_SCROLL_TO = (720, 2250)
+MENU_SCROLL_MS = 300
+TILE = {"farm": (350, 800), "village": (350, 1810), "start": (720, 1810)}
 REST_TAP = (721, 1839)                                  # 帳篷休息對話框中心
 
 # ---- 固定路線 ----
@@ -184,16 +184,11 @@ def step(img, d, px=None, drag_len=None, settle=None):
 
 
 def teleport(area, rec):
-    """機械化傳送：點愛心 → 滑選單確保列表在底部 → 點格子。
-
-    2026-10-23 實測：選單在「已經在最底部」的狀態下滑不動（screenrecord 175 格、位移 0），
-    所以這一下滑動是**保險**（若哪天列表被推上去就滑回底部），不是每輪都會看到位移。
-    使用者要求保留並滑多一點（250→700px、500→600ms）。
-    """
+    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等2秒 → 點固定格子。"""
     adb.tap(*HEART)
     time.sleep(1.0)
     adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
-    time.sleep(1.3)
+    time.sleep(2.0)
     adb.tap(*TILE[area])
     time.sleep(1.0)
     rec({"note": f"傳送 {area}"})
