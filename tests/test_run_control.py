@@ -47,7 +47,7 @@ class TestRunControl(unittest.TestCase):
 
     def test_explicit_time_limit_finishes_current_cycle(self):
         calls, rows = self.run_simulated(['--minutes', '1'])
-        self.assertEqual(calls, ['village', 'start'])
+        self.assertEqual(calls, ['village', 'start', 'farm'])
         self.assertEqual(rows[-1]['cycles'], 1)
 
 

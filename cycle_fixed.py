@@ -32,7 +32,8 @@ DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（2
 ENTRY_DRAG = 1200      # 實驗：1200 未標定，暫沿用速度表 500 的上限換算
 ENTRY_WEST_DRAG = 250  # 進場第二個移動段往西時放慢，路線距離仍是 250px
 FOREST_DRAG = 85       # 實驗：林內速度；不加等待補足週期
-ENTRY_LEGS = {"village": (1, 2), "start": (1,)}  # 起始之地休息後全部林內慢走
+FARM_DRAG = 300        # 自由農場A 林內拖曳（第2步起；進場第1步仍用 ENTRY_DRAG）
+ENTRY_LEGS = {"village": (1, 2), "start": (1,), "farm": (1,)}
 # 為什麼不是 400（488px/秒）：2026-10-22 交替實測同一 400px 腿，
 #   拖 400 → 395/387/387/392（平均 390、離散 3.9）
 #   拖 250 → 392/397/392/395/395（平均 394、離散 2.0）
@@ -43,6 +44,14 @@ MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數
 MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
+
+# ---- 補時：農場走到定位（1、2）與固定 3、4 段後，再多砍固定組數的來回 ----
+# 輪次基準＝小村莊第 2 步（第一刀）。2026-10-23 實測（無補時）：
+#   輪首 → 下一輪輪首 83.1 秒；每組 3→4（東 700、西 700，拖 300）約 3.62 秒。
+#   目標：下一輪小村莊第 2 步落在基準後 115～120 秒 → 83.1 + 10 組 ≈ 119 秒。
+# 純開環固定組數：不看時間、不判斷樹重生；要調週期就改 FILL_PAIRS。
+FILL_LEGS = {"farm": (3, 4)}   # 補時重複的段（3→4→3→4…）
+FILL_PAIRS = 10                # 再多砍幾組；1 組 = 3、4 各一次
 
 # ---- 里程模型：距離 ≈ SPEED × (按住秒 − STARTUP) ----
 # 同場兩次實測（2026-10-21，run_leg.py village 1 2 --template）：
@@ -128,11 +137,15 @@ ROUTES = {
         ("R", 180.0),
         ("N", 100.0),
     ],  # 兩區獨立調整，不連動小村莊
+    "farm": [("N", 600.0), ("L", 350.0), ("R", 700.0), ("L", 700.0)],
+    # 自由農場A：北進場 600 → 西 350 → 東 700 → 西 700（3、4 可來回重複）
 }
-LABEL = {"village": "小村莊", "start": "起始之地"}
+LABEL = {"village": "小村莊", "start": "起始之地", "farm": "自由農場A"}
 
 
 def route_drag(area, leg_number):
+    if area == "farm" and leg_number not in ENTRY_LEGS["farm"]:
+        return FARM_DRAG
     if leg_number in ENTRY_LEGS[area]:
         return ENTRY_WEST_DRAG if ROUTES[area][leg_number - 1][0] == "L" else ENTRY_DRAG
     return FOREST_DRAG
@@ -222,6 +235,17 @@ def leg(img, d, px, rec, label, drag_len=None, settle=None):
     return img
 
 
+def fill_cycle(area, rec, img, pairs=None):
+    """固定組數來回（3→4），純開環：不看時間、不判斷樹重生。"""
+    legs = FILL_LEGS[area]
+    for _ in range(FILL_PAIRS if pairs is None else pairs):
+        for n in legs:
+            d, px = ROUTES[area][n - 1]
+            img = leg(img, d, px, rec, f"{LABEL[area]}補時{n}",
+                      drag_len=route_drag(area, n), settle=0)
+    return img
+
+
 def main():
     global MEASURE
     ap = argparse.ArgumentParser()
@@ -238,7 +262,7 @@ def main():
     if args.dry_run:
         print(f"\n進場北走：拖 {ENTRY_DRAG}px；西走：拖 {ENTRY_WEST_DRAG}px；"
               f"林內：拖 {FOREST_DRAG}px → {speed_of(FOREST_DRAG):.1f}px/秒")
-        for area in ("village", "start"):
+        for area in ("village", "start", "farm"):
             print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")
             for i, act in enumerate(ROUTES[area], 1):
                 if act[0] == "REST":
@@ -247,6 +271,9 @@ def main():
                 d, px = act
                 drag = route_drag(area, i)
                 print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {hold_ms(px, drag)}ms")
+            if area in FILL_LEGS:
+                print(f"  補時：再多 {FILL_PAIRS} 組第 "
+                      f"{'、'.join(str(n) for n in FILL_LEGS[area])} 段來回（固定組數，不看時間）")
         print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（不加移動後停頓）'}"
               f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
@@ -271,7 +298,7 @@ def main():
             cycles += 1
             rec({"note": f"=== 第 {cycles} 輪 ==="})
 
-            for area in ("village", "start"):
+            for area in ("village", "start", "farm"):
                 teleport(area, rec)
                 img = shot() if MEASURE else None
                 for i, act in enumerate(ROUTES[area], 1):
@@ -281,6 +308,8 @@ def main():
                         img = leg(img, act[0], act[1], rec, LABEL[area],
                                   drag_len=route_drag(area, i),
                                   settle=0)
+                if area in FILL_LEGS:
+                    img = fill_cycle(area, rec, img)
 
             rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
             end = min(time.time() + args.wait, deadline)

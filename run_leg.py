@@ -134,12 +134,14 @@ def main():
         return args.settle
 
     img = cf.shot() if cf.MEASURE else None
+    cur_drag = [cf.DRAG_LEN]
+
     def rec_leg(o):
         rec_plain(o)
         if "source" in o:
             rec = {"dir": d, "px": px, "measured": [-v for v in o["shift"]],
                    "source": o["source"], "score": round(o["score"], 2),
-                   "drag": cf.DRAG_LEN, "area": args.area,
+                   "drag": cur_drag[0], "area": args.area,
                    "t": time.strftime("%Y-%m-%d %H:%M:%S")}
             log_walk(rec)
             print(f"    紀錄：{d} {px:.0f}px → 實走 ({rec['measured'][0]:+d},"
@@ -151,11 +153,14 @@ def main():
             time.sleep(settle_for(n))
             continue
         d, px = act
+        # 路線段照主循環的分段速度；--drag 覆寫或 --walk 臨時段才用通用 DRAG_LEN
+        drag_len = cf.route_drag(args.area, n) if not args.walk and args.drag is None else None
+        cur_drag[0] = cf.DRAG_LEN if drag_len is None else drag_len
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{n:02d}_before.jpg"), small)
         img = cf.leg(img, d, px, rec_leg, f"{cf.LABEL[args.area]}[{n}]",
-                     settle=settle_for(n))
+                     drag_len=drag_len, settle=settle_for(n))
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{n:02d}_after.jpg"), small)

@@ -31,14 +31,41 @@ class SpeedProfileTest(unittest.TestCase):
                     cf.main()
             finally:
                 os.chdir(cwd)
-        entry = {'village': {1, 2}, 'start': {1}}
-        expected = [(a, i, act) for a in ('village', 'start')
+        expected = [(a, i, act) for a in ('village', 'start', 'farm')
                     for i, act in enumerate(cf.ROUTES[a], 1) if act[0] != 'REST']
+        # 農場走完固定路線後，再補固定組數的 3、4 段來回（同一組速度、不停頓）
+        expected += [('farm', n, cf.ROUTES['farm'][n - 1])
+                     for _ in range(cf.FILL_PAIRS) for n in cf.FILL_LEGS['farm']]
         self.assertEqual(len(calls), len(expected))
         for (d, px, kw), (area, i, act) in zip(calls, expected):
             self.assertEqual((d, px), act)
-            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), (250 if act[0] == 'L' else 1200) if i in entry[area] else 85)
+            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), cf.route_drag(area, i))
             self.assertEqual(kw['settle'], 0)
+
+    def test_farm_route_distances_and_per_leg_drag(self):
+        self.assertEqual(cf.ROUTES['farm'],
+                         [('N', 600.0), ('L', 350.0), ('R', 700.0), ('L', 700.0)])
+        # 第 1 步維持進場速度；西 350、東 700、西 700 都拖 300
+        self.assertEqual([cf.route_drag('farm', n) for n in (1, 2, 3, 4)],
+                         [cf.ENTRY_DRAG, 300, 300, 300])
+
+    def test_farm_fill_repeats_legs_3_4_by_fixed_pairs(self):
+        calls = []
+
+        def leg(img, d, px, rec, label, **kwargs):
+            calls.append((d, px, kwargs))
+
+        with patch.object(cf, 'leg', side_effect=leg):
+            cf.fill_cycle('farm', lambda o: None, None, pairs=2)
+
+        # 一組＝第 3 段（東 700）＋第 4 段（西 700），拖曳都 300、不停頓
+        self.assertEqual([(d, px, kw['drag_len'], kw['settle']) for d, px, kw in calls],
+                         [('R', 700.0, 300, 0), ('L', 700.0, 300, 0)] * 2)
+
+    def test_farm_fill_defaults_to_configured_pair_count(self):
+        with patch.object(cf, 'leg') as leg:
+            cf.fill_cycle('farm', lambda o: None, None)
+        self.assertEqual(leg.call_count, cf.FILL_PAIRS * len(cf.FILL_LEGS['farm']))
 
     def test_long_movement_is_one_gesture_without_sleep(self):
         with (patch.object(cf, 'MEASURE', False), patch.object(cf.adb, 'swipe') as swipe,
@@ -55,16 +82,15 @@ class SpeedProfileTest(unittest.TestCase):
         text = out.getvalue()
         self.assertIn('拖 1200px', text)
         self.assertIn('拖 85px', text)
-        entry = {'village': {1, 2}, 'start': {1}}
         sections = text.split('\n[')[1:]
-        self.assertEqual(len(sections), 2)
-        for area, section in zip(('village', 'start'), sections):
+        self.assertEqual(len(sections), 3)
+        for area, section in zip(('village', 'start', 'farm'), sections):
             for i, act in enumerate(cf.ROUTES[area], 1):
                 if act[0] == 'REST':
                     self.assertIn(f'{i}. 休息（點 {cf.REST_TAP}，等 {cf.REST_WAIT}s）', section)
                     continue
                 d, px = act
-                drag = (250 if act[0] == 'L' else 1200) if i in entry[area] else 85
+                drag = cf.route_drag(area, i)
                 holds = str(cf.hold_ms(px, drag))
                 self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms', section)
             self.assertIn(str(cf.TILE[area]), section)
