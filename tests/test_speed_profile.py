@@ -1,4 +1,4 @@
-"""進場快、林內慢；主流程不改路線 px 或停頓，不連手機。"""
+"""進場快、林內慢；路線 px 不變，取消移動後停頓，不連手機。"""
 import contextlib
 import io
 import os
@@ -10,7 +10,7 @@ import cycle_fixed as cf
 
 
 class SpeedProfileTest(unittest.TestCase):
-    def test_main_uses_fast_entry_and_slow_forest_without_changing_settle(self):
+    def test_main_uses_fast_entry_and_slow_forest_without_settle(self):
         calls = []
         clock = [0.0]
 
@@ -37,16 +37,23 @@ class SpeedProfileTest(unittest.TestCase):
         self.assertEqual(len(calls), len(expected))
         for (d, px, kw), (area, i, act) in zip(calls, expected):
             self.assertEqual((d, px), act)
-            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), 500 if i in entry[area] else 170)
-            self.assertEqual(kw['settle'], cf.FIRST_SETTLE if i <= 2 else None)
+            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), (250 if act[0] == 'L' else 600) if i in entry[area] else 85)
+            self.assertEqual(kw['settle'], 0)
+
+    def test_movement_does_not_sleep_even_when_split(self):
+        with (patch.object(cf, 'MEASURE', False), patch.object(cf.adb, 'swipe') as swipe,
+              patch.object(cf.time, 'sleep') as sleep):
+            cf.leg(None, 'L', 250, lambda o: None, 'test', drag_len=52, settle=0)
+        self.assertGreater(swipe.call_count, 1)
+        sleep.assert_not_called()
 
     def test_dry_run_reports_both_speeds(self):
         out = io.StringIO()
         with patch('sys.argv', ['cycle_fixed.py', '--dry-run']), contextlib.redirect_stdout(out):
             cf.main()
         text = out.getvalue()
-        self.assertIn('拖 500px', text)
-        self.assertIn('拖 170px', text)
+        self.assertIn('拖 600px', text)
+        self.assertIn('拖 85px', text)
         entry = {'village': {1, 2}, 'start': {1, 3}}
         sections = text.split('\n[')[1:]
         self.assertEqual(len(sections), 2)
@@ -56,7 +63,7 @@ class SpeedProfileTest(unittest.TestCase):
                     self.assertIn(f'{i}. 休息（點 {cf.REST_TAP}，等 {cf.REST_WAIT}s）', section)
                     continue
                 d, px = act
-                drag = 500 if i in entry[area] else 170
+                drag = (250 if act[0] == 'L' else 600) if i in entry[area] else 85
                 n = cf.split_count(px, drag)
                 holds = ' + '.join(str(cf.hold_ms(px / n, drag)) for _ in range(n))
                 self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms', section)

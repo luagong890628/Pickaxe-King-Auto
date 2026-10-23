@@ -23,7 +23,8 @@ class RouteToolsTest(unittest.TestCase):
                 wait = stack.enter_context(patch.object(cf.time, 'sleep'))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 self.assertEqual(run_leg.main(), 0)
-                self.assertEqual([c.args[0] for c in wait.call_args_list], [.5, float(settle)])
+                self.assertEqual([c.args[0] for c in wait.call_args_list],
+                                 [.5] + ([float(settle)] if float(settle) else []))
 
     def test_drift_waits_only_requested_settle(self):
         with (patch('sys.argv', ['drift_test.py', '--runs', '1', '--settle', '0', '--settle-first', '.5']),
@@ -35,7 +36,7 @@ class RouteToolsTest(unittest.TestCase):
               patch.object(cf.measure, 'world_shift', return_value=(0, 0, 1, 'template')),
               contextlib.redirect_stdout(io.StringIO())):
             self.assertEqual(drift_test.main(), 0)
-        self.assertEqual([c.args[0] for c in wait.call_args_list], [2.5, .5, cf.REST_WAIT, 0, 0, 1.2])
+        self.assertEqual([c.args[0] for c in wait.call_args_list], [2.5, .5, cf.REST_WAIT, 0, 1.2])
 
     def test_run_leg_reuses_measurement_for_logging(self):
         for template in (False, True):
