@@ -41,6 +41,7 @@ ENTRY_LEGS = {"village": (1, 2), "start": (1,), "farm": (1,)}
 STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 ROUTES 的 px）
 SETTLE = 0.0           # 不加移動後等待；按目前速度實際完成，不補足週期
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
+VERBOSE = False        # False＝console 只印大項目（輪次、傳送、休息）；log.jsonl 一律記全部
 MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
@@ -205,7 +206,8 @@ def teleport(area, rec):
     time.sleep(0.5)
     adb.tap(*TILE[area])
     time.sleep(0.5)
-    rec({"note": f"傳送 {area}"})
+    rec({"note": f"傳送 {area}", "big": True,
+         "show": f"[{LABEL[area]}] 傳送完成"})
 
 
 REST_WAIT = 2.0          # 點擊休息後等動畫（2026-10-23 由 3.2 改 2 秒，尚未實跑驗證）
@@ -214,7 +216,8 @@ REST_WAIT = 2.0          # 點擊休息後等動畫（2026-10-23 由 3.2 改 2 �
 def rest(rec, img, label):
     adb.tap(*REST_TAP)
     time.sleep(REST_WAIT)
-    rec({"note": f"{label} 休息（點固定座標）"})
+    rec({"note": f"{label} 休息（點固定座標）", "big": True,
+         "show": f"[{label}] 休息"})
     return shot() if MEASURE else img      # 不量位移就不截圖（省 0.76s）
 
 
@@ -248,17 +251,20 @@ def fill_cycle(area, rec, img, pairs=None):
 
 
 def main():
-    global MEASURE
+    global MEASURE, VERBOSE
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=None,
                     help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
     ap.add_argument("--wait", type=float, default=0,
                     help="每輪之間額外等幾秒（預設 0：靠林內慢走控制週期）")
+    ap.add_argument("--verbose", action="store_true",
+                    help="console 也印每一段（預設只印輪次、傳送、休息與錯誤）")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--measure", action="store_true",
                     help="每段量實際位移（每段多花約 0.8 秒截圖；調 px 時用）")
     args = ap.parse_args()
     MEASURE = args.measure
+    VERBOSE = args.verbose
 
     if args.dry_run:
         print(f"\n進場北走：拖 {ENTRY_DRAG}px；西走：拖 {ENTRY_WEST_DRAG}px；"
@@ -287,9 +293,11 @@ def main():
         o["t"] = time.strftime("%H:%M:%S")
         log.write(json.dumps(o, ensure_ascii=False) + "\n")
         log.flush()
-        print(json.dumps(o, ensure_ascii=False), flush=True)
+        if VERBOSE or o.get("big"):
+            print(o.get("show") or o["note"], flush=True)
 
-    rec({"note": "開始", "wait": args.wait, "分鐘": args.minutes})
+    rec({"note": "開始", "big": True, "wait": args.wait, "分鐘": args.minutes,
+         "show": "開始（" + ("無限" if args.minutes is None else f"{args.minutes:g} 分鐘") + "）"})
     t0 = time.time()
     deadline = float("inf") if args.minutes is None else t0 + args.minutes * 60
     cycles = 0
@@ -297,10 +305,14 @@ def main():
     try:
         while time.time() < deadline:
             cycles += 1
-            rec({"note": f"=== 第 {cycles} 輪 ==="})
+            rec({"note": f"=== 第 {cycles} 輪 ===", "big": True})
 
             for area in ("village", "start", "farm"):
                 teleport(area, rec)
+                note = f"[{LABEL[area]}] 開始採集"
+                if area in FILL_LEGS:
+                    note += f"（{len(ROUTES[area])} 段＋補時 {FILL_PAIRS} 組）"
+                rec({"note": f"{LABEL[area]} 開始採集", "big": True, "show": note})
                 img = shot() if MEASURE else None
                 for i, act in enumerate(ROUTES[area], 1):
                     if act[0] == "REST":
@@ -312,15 +324,17 @@ def main():
                 if area in FILL_LEGS:
                     img = fill_cycle(area, rec, img)
 
-            rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
+            rec({"note": "本輪結束", "big": True,
+                 "show": f"本輪結束（累計 {round((time.time() - t0) / 60, 1)} 分鐘）"})
             end = min(time.time() + args.wait, deadline)
             while time.time() < end:
                 time.sleep(min(2, end - time.time()))
 
     except KeyboardInterrupt:
-        rec({"note": "使用者停止（Ctrl+C）"})
+        rec({"note": "使用者停止（Ctrl+C）", "big": True, "show": "使用者停止（Ctrl+C）"})
     finally:
-        rec({"note": "收工", "cycles": cycles, "小時": round((time.time() - t0) / 3600, 2)})
+        rec({"note": "收工", "big": True, "show": f"收工（完成 {cycles} 輪）",
+             "cycles": cycles, "小時": round((time.time() - t0) / 3600, 2)})
         log.close()
 
 
