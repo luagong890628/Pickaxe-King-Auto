@@ -31,7 +31,7 @@ class SpeedProfileTest(unittest.TestCase):
                     cf.main()
             finally:
                 os.chdir(cwd)
-        entry = {'village': {1, 2}, 'start': {1, 3}}
+        entry = {'village': {1, 2}, 'start': {1}}
         expected = [(a, i, act) for a in ('village', 'start')
                     for i, act in enumerate(cf.ROUTES[a], 1) if act[0] != 'REST']
         self.assertEqual(len(calls), len(expected))
@@ -40,11 +40,12 @@ class SpeedProfileTest(unittest.TestCase):
             self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), (250 if act[0] == 'L' else 1200) if i in entry[area] else 85)
             self.assertEqual(kw['settle'], 0)
 
-    def test_movement_does_not_sleep_even_when_split(self):
+    def test_long_movement_is_one_gesture_without_sleep(self):
         with (patch.object(cf, 'MEASURE', False), patch.object(cf.adb, 'swipe') as swipe,
               patch.object(cf.time, 'sleep') as sleep):
-            cf.leg(None, 'L', 250, lambda o: None, 'test', drag_len=52, settle=0)
-        self.assertGreater(swipe.call_count, 1)
+            cf.leg(None, 'L', 450, lambda o: None, 'test', drag_len=85, settle=0)
+        self.assertEqual(swipe.call_count, 1)
+        self.assertEqual(swipe.call_args.args[-1], cf.hold_ms(450, 85))
         sleep.assert_not_called()
 
     def test_dry_run_reports_both_speeds(self):
@@ -54,7 +55,7 @@ class SpeedProfileTest(unittest.TestCase):
         text = out.getvalue()
         self.assertIn('拖 1200px', text)
         self.assertIn('拖 85px', text)
-        entry = {'village': {1, 2}, 'start': {1, 3}}
+        entry = {'village': {1, 2}, 'start': {1}}
         sections = text.split('\n[')[1:]
         self.assertEqual(len(sections), 2)
         for area, section in zip(('village', 'start'), sections):
@@ -64,8 +65,7 @@ class SpeedProfileTest(unittest.TestCase):
                     continue
                 d, px = act
                 drag = (250 if act[0] == 'L' else 1200) if i in entry[area] else 85
-                n = cf.split_count(px, drag)
-                holds = ' + '.join(str(cf.hold_ms(px / n, drag)) for _ in range(n))
+                holds = str(cf.hold_ms(px, drag))
                 self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms', section)
             self.assertIn(str(cf.TILE[area]), section)
         self.assertIn(f'愛心{cf.HEART}', text)

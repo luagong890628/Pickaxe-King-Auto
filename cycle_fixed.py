@@ -32,7 +32,7 @@ DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（2
 ENTRY_DRAG = 1200      # 實驗：1200 未標定，暫沿用速度表 500 的上限換算
 ENTRY_WEST_DRAG = 250  # 進場第二個移動段往西時放慢，路線距離仍是 250px
 FOREST_DRAG = 85       # 實驗：林內速度；不加等待補足週期
-ENTRY_LEGS = {"village": (1, 2), "start": (1, 3)}  # 起始之地第 2 項是休息
+ENTRY_LEGS = {"village": (1, 2), "start": (1,)}  # 起始之地休息後全部林內慢走
 # 為什麼不是 400（488px/秒）：2026-10-22 交替實測同一 400px 腿，
 #   拖 400 → 395/387/387/392（平均 390、離散 3.9）
 #   拖 250 → 392/397/392/395/395（平均 394、離散 2.0）
@@ -74,7 +74,7 @@ def speed_of(drag_len: float) -> float:
             return v0 + t * (v1 - v0)
     return SPEED_TABLE[-1][1]
 
-MAX_HOLD_MS = 4000         # 讓林內350px合併段一次按住走完；更長才拆段
+
 # 按住下限。2026-10-21 實測（test_hold.py，固定起點 (720,2600)、拖曳 250px）：
 #   500ms→173px、300→112、250→96、200→80、150→51、120→37、100→37、80→24、60→13、40→8、20→0~11
 # 也就是**只要拖曳就算移動，沒有「被判成點擊」的門檻**（位移縮到量測解析度內為止）；
@@ -111,24 +111,22 @@ ROUTES = {
     "start": [
         ("N", 425.0),      # 1 往北到帳篷（2026-10-22 改 425；對話框 ≈ (721,1839)）
         ("REST",),         # 2 點帳篷休息
-        ("L", 250.0),
-        ("L", 200.0),
-        ("N", 150.0),
+        ("L", 450.0),      # 第2個移動：合併西走，後續對齊小村莊第4段起
+        ("N", 125.0),
         ("R", 250.0),
-        ("N", 150.0),
-        ("L", 200.0),
+        ("N", 125.0),
+        ("L", 250.0),
         ("N", 100.0),
-        ("R", 150.0),
-        ("R", 150.0),
-        ("S", 100.0),
+        ("R", 350.0),
+        ("S", 125.0),
         ("R", 200.0),
-        ("N", 100.0),
-        ("R", 150.0),
-        ("R", 150.0),
-        ("S", 150.0),
-        ("L", 150.0),
-        ("S", 200.0),
+        ("N", 125.0),
+        ("R", 350.0),
+        ("S", 125.0),
+        ("L", 250.0),
+        ("S", 250.0),
         ("R", 180.0),
+        ("N", 100.0),
     ],  # 兩區獨立調整，不連動小村莊
 }
 LABEL = {"village": "小村莊", "start": "起始之地"}
@@ -157,12 +155,6 @@ def hold_ms(px: float, drag_len: float = None) -> int:
     v = speed_of(DRAG_LEN if drag_len is None else drag_len)
     return int(max(MIN_HOLD_MS, px / v * 1000 + STARTUP_MS))
 
-
-def split_count(px: float, drag_len: float = None) -> int:
-    """一段 px 要不要拆。每段各自要付 STARTUP_MS，所以用「扣掉起步後可用時長」換算。"""
-    v = speed_of(DRAG_LEN if drag_len is None else drag_len)
-    usable = max(1, MAX_HOLD_MS - STARTUP_MS)
-    return max(1, math.ceil(px / v * 1000 / usable))
 
 
 def step(img, d, px=None, drag_len=None, settle=None):
@@ -218,28 +210,17 @@ def rest(rec, img, label):
 
 
 def leg(img, d, px, rec, label, drag_len=None, settle=None):
-    """一個方向走 px（按住時間＝px/速度；超過 MAX_HOLD_MS 就平均拆段）。"""
+    """一個路線動作只送一次拖曳，不限制時長、不自動拆段。"""
     if px <= 0:
         return img
     L = DRAG_LEN if drag_len is None else drag_len
-    n = split_count(px, L)
-    seg = px / n
-    tx = ty = 0.0
-    measurements = []
-    for _ in range(n):
-        dx, dy, img, measured = step(img, d, seg, L, settle)
-        tx += dx
-        ty += dy
-        if measured is not None:
-            measurements.append(measured)
-    note = (f"{label} {NAMES[d]} {px:.0f}px"
-            + (f"（拖 {L:.0f}px／拆 {n} 段）" if n > 1 else f"（拖 {L:.0f}px）"))
+    tx, ty, img, measured = step(img, d, px, L, settle)
+    note = f"{label} {NAMES[d]} {px:.0f}px（拖 {L:.0f}px）"
     if MEASURE:
         result = {"note": note, "shift": [round(tx), round(ty)],
                   "目標": [round(px * DIRS[d][0]), round(px * DIRS[d][1])]}
-        if len(measurements) == n:
-            result["score"] = min(m[0] for m in measurements)
-            result["source"] = "+".join(dict.fromkeys(m[1] for m in measurements))
+        if measured is not None:
+            result["score"], result["source"] = measured
         rec(result)
     else:
         rec({"note": note})
@@ -270,10 +251,7 @@ def main():
                     continue
                 d, px = act
                 drag = route_drag(area, i)
-                n = split_count(px, drag)
-                holds = " + ".join(f"{hold_ms(px / n, drag)}" for _ in range(n))
-                extra = f"（拆 {n} 段）" if n > 1 else ""
-                print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms{extra}")
+                print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {hold_ms(px, drag)}ms")
         print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（不加移動後停頓）'}"
               f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return

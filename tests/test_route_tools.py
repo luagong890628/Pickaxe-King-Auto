@@ -63,21 +63,20 @@ class RouteToolsTest(unittest.TestCase):
                 self.assertEqual(row['source'], 'template' if template else 'scroll')
                 self.assertEqual(row['score'], .99 if template else .95)
 
-    def test_split_leg_aggregates_existing_measurements(self):
+    def test_long_leg_reuses_single_measurement(self):
         rows = []
         with (patch.object(cf, 'MEASURE', True),
               patch.object(cf, 'MEASURE_TEMPLATE', False),
               patch.object(cf.adb, 'swipe') as swipe,
               patch.object(cf.time, 'sleep'),
-              patch.object(cf, 'shot', side_effect=['middle', 'after']),
-              patch.object(cf.measure, 'world_shift', side_effect=[
-                  (-750, 0, .95, 'template'), (-749, 0, .60, 'scroll')]) as world):
+              patch.object(cf, 'shot', return_value='after'),
+              patch.object(cf.measure, 'world_shift', return_value=(-1499, 0, .95, 'template')) as world):
             self.assertEqual(cf.leg('before', 'L', 1500, rows.append, 'test'), 'after')
-        self.assertEqual(swipe.call_count, 2)
-        self.assertEqual(world.call_count, 2)
+        self.assertEqual(swipe.call_count, 1)
+        self.assertEqual(world.call_count, 1)
         self.assertEqual(rows[0]['shift'], [1499, 0])
-        self.assertEqual(rows[0]['score'], .60)
-        self.assertEqual(rows[0]['source'], 'template+scroll')
+        self.assertEqual(rows[0]['score'], .95)
+        self.assertEqual(rows[0]['source'], 'template')
 
     def test_missing_measurement_does_not_claim_valid_metadata(self):
         rows = []

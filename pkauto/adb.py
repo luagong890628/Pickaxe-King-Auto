@@ -83,7 +83,8 @@ def tap(x: int, y: int) -> None:
 
 def swipe(x1: int, y1: int, x2: int, y2: int, ms: int = 300) -> None:
     _run(["shell", "input", "swipe",
-          str(int(x1)), str(int(y1)), str(int(x2)), str(int(y2)), str(int(ms))])
+          str(int(x1)), str(int(y1)), str(int(x2)), str(int(y2)), str(int(ms))],
+         timeout=max(30, ms / 1000 + 10))
 
 
 def long_press(x: int, y: int, ms: int = 800) -> None:

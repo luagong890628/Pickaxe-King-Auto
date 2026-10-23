@@ -62,22 +62,10 @@ class TestMileage(unittest.TestCase):
         """極短距離不可低於 MIN_HOLD_MS。"""
         self.assertEqual(cf.hold_ms(20, 400), cf.MIN_HOLD_MS)
 
-    def test_split_count(self):
-        """單段不超過 MAX_HOLD_MS；拆段後每段都要在上限內。"""
-        self.assertEqual(cf.split_count(970, 250), 1)
-        self.assertEqual(cf.split_count(970, 400), 1)
-        for drag in (250, 400):
-            for px in (2400, 3000):
-                n = cf.split_count(px, drag)
-                self.assertGreaterEqual(n, 2)
-                self.assertLessEqual(cf.hold_ms(px / n, drag), cf.MAX_HOLD_MS)
+    def test_long_hold_has_no_upper_cap(self):
+        self.assertGreater(cf.hold_ms(450, 85), 4000)
+        self.assertGreater(cf.hold_ms(4000, 85), 30000)
 
-    def test_split_usable_window(self):
-        """拆段判斷用「MAX_HOLD_MS − STARTUP_MS」的可用時長（不是整段上限）。"""
-        usable = cf.MAX_HOLD_MS - cf.STARTUP_MS
-        v = cf.speed_of(250)
-        self.assertEqual(cf.split_count(usable / 1000 * v - 1, 250), 1)
-        self.assertEqual(cf.split_count(usable / 1000 * v + 1, 250), 2)
 
 
 if __name__ == "__main__":
