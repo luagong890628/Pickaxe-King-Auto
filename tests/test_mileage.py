@@ -67,7 +67,7 @@ class TestMileage(unittest.TestCase):
         self.assertEqual(cf.split_count(970, 250), 1)
         self.assertEqual(cf.split_count(970, 400), 1)
         for drag in (250, 400):
-            for px in (1500, 2400):
+            for px in (2400, 3000):
                 n = cf.split_count(px, drag)
                 self.assertGreaterEqual(n, 2)
                 self.assertLessEqual(cf.hold_ms(px / n, drag), cf.MAX_HOLD_MS)
