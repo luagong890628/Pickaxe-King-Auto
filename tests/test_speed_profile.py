@@ -37,7 +37,7 @@ class SpeedProfileTest(unittest.TestCase):
         self.assertEqual(len(calls), len(expected))
         for (d, px, kw), (area, i, act) in zip(calls, expected):
             self.assertEqual((d, px), act)
-            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), (250 if act[0] == 'L' else 600) if i in entry[area] else 85)
+            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), (250 if act[0] == 'L' else 1200) if i in entry[area] else 85)
             self.assertEqual(kw['settle'], 0)
 
     def test_movement_does_not_sleep_even_when_split(self):
@@ -52,7 +52,7 @@ class SpeedProfileTest(unittest.TestCase):
         with patch('sys.argv', ['cycle_fixed.py', '--dry-run']), contextlib.redirect_stdout(out):
             cf.main()
         text = out.getvalue()
-        self.assertIn('拖 600px', text)
+        self.assertIn('拖 1200px', text)
         self.assertIn('拖 85px', text)
         entry = {'village': {1, 2}, 'start': {1, 3}}
         sections = text.split('\n[')[1:]
@@ -63,7 +63,7 @@ class SpeedProfileTest(unittest.TestCase):
                     self.assertIn(f'{i}. 休息（點 {cf.REST_TAP}，等 {cf.REST_WAIT}s）', section)
                     continue
                 d, px = act
-                drag = (250 if act[0] == 'L' else 600) if i in entry[area] else 85
+                drag = (250 if act[0] == 'L' else 1200) if i in entry[area] else 85
                 n = cf.split_count(px, drag)
                 holds = ' + '.join(str(cf.hold_ms(px / n, drag)) for _ in range(n))
                 self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms', section)
