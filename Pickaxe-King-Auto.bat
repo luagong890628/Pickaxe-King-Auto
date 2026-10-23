@@ -51,7 +51,10 @@ if %ONLINE% GTR 1 echo Note: %ONLINE% adb entries for this phone, using %TARGET%
 echo Connected: %TARGET%
 set "ANDROID_SERIAL=%TARGET%"
 echo.
-echo Open the game on the phone now.
+echo Before you start:
+echo   - open the game on the phone
+echo   - turn the screen brightness down
+echo.
 echo Press Enter to start Pickaxe-King-Auto...
 set /p "_="
 
