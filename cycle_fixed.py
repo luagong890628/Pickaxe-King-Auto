@@ -304,7 +304,7 @@ def main():
     try:
         while time.time() < deadline:
             cycles += 1
-            rec({"note": f"=== 第 {cycles} 輪 ===", "big": True})
+            rec({"note": f"=== 第 {cycles} 輪 ({time.strftime('%H:%M')}) ===", "big": True})
 
             for area in ("village", "start", "farm"):
                 teleport(area, rec)
