@@ -216,8 +216,7 @@ REST_WAIT = 2.0          # 點擊休息後等動畫（2026-10-23 由 3.2 改 2 �
 def rest(rec, img, label):
     adb.tap(*REST_TAP)
     time.sleep(REST_WAIT)
-    rec({"note": f"{label} 休息（點固定座標）", "big": True,
-         "show": f"[{label}] 休息"})
+    rec({"note": f"{label} 休息（點固定座標）"})
     return shot() if MEASURE else img      # 不量位移就不截圖（省 0.76s）
 
 
@@ -309,10 +308,7 @@ def main():
 
             for area in ("village", "start", "farm"):
                 teleport(area, rec)
-                note = f"[{LABEL[area]}] 開始採集"
-                if area in FILL_LEGS:
-                    note += f"（{len(ROUTES[area])} 段＋補時 {FILL_PAIRS} 組）"
-                rec({"note": f"{LABEL[area]} 開始採集", "big": True, "show": note})
+                rec({"note": f"[{LABEL[area]}] 開始採集", "big": True})
                 img = shot() if MEASURE else None
                 for i, act in enumerate(ROUTES[area], 1):
                     if act[0] == "REST":
@@ -324,8 +320,7 @@ def main():
                 if area in FILL_LEGS:
                     img = fill_cycle(area, rec, img)
 
-            rec({"note": "本輪結束", "big": True,
-                 "show": f"本輪結束（累計 {round((time.time() - t0) / 60, 1)} 分鐘）"})
+            rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
             end = min(time.time() + args.wait, deadline)
             while time.time() < end:
                 time.sleep(min(2, end - time.time()))
