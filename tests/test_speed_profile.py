@@ -22,7 +22,7 @@ class SpeedProfileTest(unittest.TestCase):
             cwd = os.getcwd()
             try:
                 os.chdir(tmp)
-                with (patch('sys.argv', ['cycle_fixed.py', '--minutes', '.1']),
+                with (patch('sys.argv', ['cycle_fixed.py', '--cycles', '1']),
                       patch.object(cf.time, 'time', side_effect=lambda: clock[0]),
                       patch.object(cf, 'teleport'), patch.object(cf, 'rest'),
                       patch.object(cf, 'leg', side_effect=leg),

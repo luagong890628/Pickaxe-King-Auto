@@ -45,10 +45,11 @@ class TestRunControl(unittest.TestCase):
         self.assertTrue(any(row.get('note') == '使用者停止（Ctrl+C）' for row in rows))
         self.assertEqual(rows[-1]['note'], '收工')
 
-    def test_explicit_time_limit_finishes_current_cycle(self):
+    def test_explicit_time_limit_stops_between_stations(self):
+        # 時間到就在「站與站之間」停，不會把某一區走到一半丟著
         calls, rows = self.run_simulated(['--minutes', '1'])
-        self.assertEqual(calls, ['village', 'start', 'farm'])
-        self.assertEqual(rows[-1]['cycles'], 1)
+        self.assertEqual(calls, ['village'])
+        self.assertEqual(rows[-1]['站數'], 1)
 
 
 if __name__ == '__main__':

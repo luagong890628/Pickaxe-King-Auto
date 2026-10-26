@@ -239,6 +239,45 @@ ROUTES = {
 }
 LABEL = {"village": "小村莊", "start": "起始之地", "farm": "自由農場A"}
 
+# ---- 排程：各地區的資源刷新時間（秒）----
+# 為什麼要這個：以前是「小村莊→起始之地→農場」固定一輪，不管有沒有刷新。
+# 一輪 98 秒、農場卻要 240 秒才刷新 → **每 2.4 趟就有 1.4 趟是白跑**（走過去、什麼都沒有）。
+# 改成「只去已經刷新的地區」，空下來的時間拿去打其他場，而不是空跑一趟沒有東西的路線。
+# 0 = 隨時可去（沒有刷新限制的地區用）。
+REFRESH = {
+    "village": 100.0,   # 樹重生（實測約 100 秒）
+    "start": 100.0,     # 起始之地與小村莊同一批樹
+    "farm": 240.0,      # 作物刷新 4 分鐘（使用者 2026-10-26 確認）
+}
+# 加新場地時：ROUTES 加路線、LABEL 加名稱、這裡加刷新秒數，排程器就會自動排進去。
+
+
+def next_stop(now, last):
+    """排程器：回傳 (地區, 還要等幾秒)。等 0 表示現在就可以去。
+
+    規則：只去「已經刷新」的地區，並優先挑**超過自己週期最多**的那個。
+    用比例而不是絕對秒數，是因為某區如果一趟走得比它的刷新時間還久，
+    用絕對秒數會讓它永遠最「超時」→ 把其他區餓死；用比例則各區都會輪到。
+    全部都在刷新中 → 回傳最快好的那一個，以及要等多久（由呼叫端負責睡）。
+
+    last[area] = 上一次「開始採集」的時刻；沒去過視為 -inf（永遠最優先）。
+    """
+    cand = []
+    for i, a in enumerate(REFRESH):
+        r = REFRESH[a]
+        cand.append((last.get(a, float("-inf")) + r, i, a, r))
+    ready = [c for c in cand if c[0] <= now]
+    if ready:
+        def overdue(c):
+            _, _, _, r = c
+            return float("inf") if r <= 0 else (now - (c[0] - r)) / r
+
+        # 同分時取順序前面那個（-i 越大＝i 越小），讓第一趟固定是 village → start → farm
+        return max(ready, key=lambda c: (overdue(c), -c[1]))[2], 0.0
+    t, _, a, _ = min(cand)
+    return a, t - now
+
+
 # 起始之地後段與小村莊共用 → 停頓點直接沿用。
 # 前段比小村莊多出 REST 這一段，所以段號要平移 _SHIFT：
 #   起始之地第 4 段（西 300）＝小村莊第 3 段，第 5 段＝小村莊第 4 段 …
@@ -426,7 +465,7 @@ def main():
     ap.add_argument("--minutes", type=float, default=None,
                     help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
     ap.add_argument("--cycles", type=int, default=None,
-                    help="跑幾輪就停（預設不限；--cycles 1 ＝完整走一趟三區後結束）")
+                    help="跑幾輪就停（預設不限；--cycles 1 ＝每個地區各採一次後結束）")
     ap.add_argument("--wait", type=float, default=0,
                     help="每輪之間額外等幾秒（預設 0：靠林內慢走控制週期）")
     ap.add_argument("--verbose", action="store_true",
@@ -473,8 +512,12 @@ def main():
         if args.pearl_only:
             print("※ --pearl-only：只傳送到小村莊走珍珠，忽略冷卻，不走任何採集路段")
             return
-        print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（不加移動後停頓）'}"
-              f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
+        print("\n排程（只去已刷新的地區；全部都在刷新就等最快好的那個）：")
+        for a in REFRESH:
+            r = REFRESH[a]
+            print(f"  {LABEL[a]:8s} 刷新 {r:5.0f}s" + ("（隨時可去）" if r <= 0 else ""))
+        print(f"  {'珍珠':8s} 冷卻 {PEARL_COOLDOWN:5.0f}s（附掛在小村莊，不會單獨跑一趟）")
+        print(f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
 
     run = Path("captures") / time.strftime("fixed_%Y%m%d_%H%M%S")
@@ -492,7 +535,6 @@ def main():
          "show": "開始（" + ("無限" if args.minutes is None else f"{args.minutes:g} 分鐘") + "）"})
     t0 = time.time()
     deadline = float("inf") if args.minutes is None else t0 + args.minutes * 60
-    cycles = 0
 
     if args.pearl_only:
         # 只走珍珠：傳送到小村莊落點 → 西 → 點珍珠 → 東 → 結束。
@@ -534,38 +576,54 @@ def main():
             log.close()
         return
 
+    # --cycles N ＝ 走完 N 趟「每一區各採一次」的份量（＝ N × 地區數 站），
+    # 保留原本「--cycles 1 就是走完三區一輪」的語意。
+    step_limit = None if args.cycles is None else args.cycles * len(REFRESH)
+    last_visit = {}          # area → 上一次開始採集的時刻
+    steps = 0
+
     try:
-        while time.time() < deadline and (args.cycles is None or cycles < args.cycles):
-            cycles += 1
-            rec({"note": f"=== 第 {cycles} 輪 ({time.strftime('%H:%M')}) ===", "big": True})
+        while time.time() < deadline and (step_limit is None or steps < step_limit):
+            area, wait = next_stop(time.time(), last_visit)
+            if wait > 0:
+                rec({"note": f"{LABEL[area]} 還沒刷新，等 {wait:.0f}s", "big": True,
+                     "show": f"等 {LABEL[area]} 刷新 {wait:.0f}s"})
+                end = min(time.time() + wait, deadline)
+                while time.time() < end:
+                    time.sleep(min(2, end - time.time()))
+                if time.time() >= deadline:
+                    break
+                continue
 
-            for area in ("village", "start", "farm"):
-                teleport(area, rec)
-                rec({"note": f"[{LABEL[area]}] 開始採集", "big": True})
-                img = shot() if MEASURE else None
-                if area == "village" and not args.no_pearl:
-                    img = pearl(rec, img)      # 冷卻沒到會自己跳過，不影響路線
-                for i, act in enumerate(ROUTES[area], 1):
-                    if act[0] == "REST":
-                        img = rest(rec, img, LABEL[area])
-                    else:
-                        d, px, _ = route_act(act)
-                        img = leg(img, d, px, rec, LABEL[area],
-                                  drag_len=route_drag(area, i),
-                                  settle=route_settle(area, i))
-                if area in FILL_LEGS:
-                    img = fill_cycle(area, rec, img)
+            steps += 1
+            last_visit[area] = time.time()          # 以「開始採集」為刷新起點（保守）
+            rec({"note": f"=== 第 {steps} 站：{LABEL[area]} ({time.strftime('%H:%M')}) ===",
+                 "big": True, "show": f"=== 第 {steps} 站：{LABEL[area]} ==="})
 
-            rec({"note": "本輪結束", "已跑分鐘": round((time.time() - t0) / 60, 1)})
-            end = min(time.time() + args.wait, deadline)
-            while time.time() < end:
-                time.sleep(min(2, end - time.time()))
+            teleport(area, rec)
+            rec({"note": f"[{LABEL[area]}] 開始採集", "big": True})
+            img = shot() if MEASURE else None
+            if area == "village" and not args.no_pearl:
+                img = pearl(rec, img)      # 冷卻沒到會自己跳過，不影響路線
+            for i, act in enumerate(ROUTES[area], 1):
+                if act[0] == "REST":
+                    img = rest(rec, img, LABEL[area])
+                else:
+                    d, px, _ = route_act(act)
+                    img = leg(img, d, px, rec, LABEL[area],
+                              drag_len=route_drag(area, i),
+                              settle=route_settle(area, i))
+            if area in FILL_LEGS:
+                img = fill_cycle(area, rec, img)
+
+            if args.wait:
+                time.sleep(args.wait)
 
     except KeyboardInterrupt:
         rec({"note": "使用者停止（Ctrl+C）", "big": True, "show": "使用者停止（Ctrl+C）"})
     finally:
-        rec({"note": "收工", "big": True, "show": f"收工（完成 {cycles} 輪）",
-             "cycles": cycles, "小時": round((time.time() - t0) / 3600, 2)})
+        rec({"note": "收工", "big": True, "show": f"收工（完成 {steps} 站）",
+             "站數": steps, "小時": round((time.time() - t0) / 3600, 2)})
         log.close()
 
 
