@@ -159,21 +159,29 @@ class PerLegSettleTest(unittest.TestCase):
             self.assertEqual(cf.route_settle('village', n), 0.5)
 
     def test_start_shares_village_tail_pauses(self):
-        # 起始之地第 4 段起＝小村莊第 4 段起 → 停頓點必須一致（第 3 段是合併西走，也沿用）
-        for n in range(3, len(cf.ROUTES['start']) + 1):
-            self.assertEqual(cf.route_settle('start', n), cf.route_settle('village', n))
-        # 前兩段是自己的（進場 + 休息），不停
-        self.assertEqual(cf.route_settle('start', 1), 0.0)
-        self.assertEqual(cf.route_settle('start', 2), 0.0)
+        # 起始之地第 5 段起＝小村莊第 4 段起 → 停頓點必須一致（段號平移 1：前段多了 REST）
+        for n in range(4, len(cf.ROUTES['start']) + 1):
+            self.assertEqual(cf.route_settle('start', n), cf.route_settle('village', n - 1))
+        # 前段是自己的（進場、休息、西 150 快走），不停
+        for n in (1, 2, 3):
+            self.assertEqual(cf.route_settle('start', n), 0.0)
 
     def test_farm_does_not_pause_yet(self):
         self.assertEqual([n for n in range(1, len(cf.ROUTES['farm']) + 1)
                           if cf.route_settle('farm', n)], [])
 
     def test_start_route_is_prefix_plus_village_tail(self):
-        self.assertEqual(cf.ROUTES['start'][:3],
-                         [('N', 425.0), ('REST',), ('L', 450.0)])
-        self.assertEqual(cf.ROUTES['start'][3:], cf.VILLAGE[3:])
+        self.assertEqual(cf.ROUTES['start'][:4],
+                         [('N', 425.0), ('REST',), ('L', 150.0), ('L', 300.0)])
+        self.assertEqual(cf.ROUTES['start'][4:], cf.VILLAGE[3:])
+
+    def test_start_after_rest_is_fast_then_slow(self):
+        # 休息完先走一段快的（拖 ENTRY_WEST_DRAG）、再走一段慢的（拖 FOREST_DRAG）
+        self.assertEqual(cf.route_drag('start', 3), cf.ENTRY_WEST_DRAG)
+        self.assertEqual(cf.route_drag('start', 4), cf.FOREST_DRAG)
+        self.assertGreater(cf.speed_of(cf.ENTRY_WEST_DRAG), cf.speed_of(cf.FOREST_DRAG))
+        # 兩段合計仍是原本的西 450，終點不變
+        self.assertEqual(cf.ROUTES['start'][2][1] + cf.ROUTES['start'][3][1], 450.0)
 
     def test_leg_12_north_is_longer(self):
         self.assertEqual(cf.route_act(cf.ROUTES['village'][11]), ('N', 150.0, None))
