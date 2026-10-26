@@ -369,15 +369,47 @@ def fill_cycle(area, rec, img, pairs=None):
     return img
 
 
+# ---- 珍珠（小村莊）：純插拔，冷卻 10 分鐘 ----
+# 2026-10-26 使用者實測：從傳送落點往西 1080 → 點 (721,1839) → 往東 1080
+# **會精準回到落點**，所以不影響後面的路線，可以插在村莊流程最前面。
+# 點擊座標和小屋休息同一個（REST_TAP）；冷卻中點下去不會有反應（跟黃金樹一樣）。
+PEARL_WEST = 1080.0        # 往西走多遠（東西向拖曳上限 720px，1080 是分段走的距離，不是拖曳長度）
+PEARL_EAST = 1080.0        # 回程往東（= 西的距離，才會回到原位）
+PEARL_COOLDOWN = 600.0     # 冷卻 10 分鐘
+_pearl_at = 0.0            # 上次拿到珍珠的時刻（0＝還沒拿過，第一輪一定去）
+
+
+def pearl(rec, img):
+    """往西 1080 → 點珍珠 → 往東 1080 回原位。冷卻沒到就跳過、什麼都不做。
+
+    用「距離上次拿到超過冷卻」判斷，不用「每 N 輪」：
+    輪次長度會隨路線/速度變動，用輪數會在調整路線後失準。
+    """
+    global _pearl_at
+    if _pearl_at and time.time() - _pearl_at < PEARL_COOLDOWN:
+        return img
+    img = leg(img, "L", PEARL_WEST, rec, "珍珠去程", drag_len=FOREST_DRAG, settle=0)
+    adb.tap(*REST_TAP)
+    time.sleep(REST_WAIT)                    # 等拿取動畫
+    img = leg(img, "R", PEARL_EAST, rec, "珍珠回程", drag_len=FOREST_DRAG, settle=0)
+    _pearl_at = time.time()
+    rec({"note": "拿珍珠", "big": True, "show": "拿珍珠（冷卻 10 分鐘）"})
+    return img
+
+
 def main():
     global MEASURE, VERBOSE, SPEED_SCALE
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=None,
                     help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
+    ap.add_argument("--cycles", type=int, default=None,
+                    help="跑幾輪就停（預設不限；--cycles 1 ＝完整走一趟三區後結束）")
     ap.add_argument("--wait", type=float, default=0,
                     help="每輪之間額外等幾秒（預設 0：靠林內慢走控制週期）")
     ap.add_argument("--verbose", action="store_true",
                     help="console 也印每一段（預設只印輪次、傳送、休息與錯誤）")
+    ap.add_argument("--no-pearl", action="store_true",
+                    help="不拿珍珠（預設每超過 10 分鐘冷卻就去拿一次）")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--measure", action="store_true",
                     help="每段量實際位移（每段多花約 0.8 秒截圖；調 px 時用）")
@@ -410,6 +442,8 @@ def main():
             if area in FILL_LEGS:
                 print(f"  補時：再多 {FILL_PAIRS} 組第 "
                       f"{'、'.join(str(n) for n in FILL_LEGS[area])} 段來回（固定組數，不看時間）")
+        print(f"珍珠：往西 {PEARL_WEST:.0f} → 點 {REST_TAP} → 往東 {PEARL_EAST:.0f}"
+              f"（冷卻 {PEARL_COOLDOWN/60:.0f} 分鐘；第一輪一定拿）")
         print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（不加移動後停頓）'}"
               f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
@@ -432,7 +466,7 @@ def main():
     cycles = 0
 
     try:
-        while time.time() < deadline:
+        while time.time() < deadline and (args.cycles is None or cycles < args.cycles):
             cycles += 1
             rec({"note": f"=== 第 {cycles} 輪 ({time.strftime('%H:%M')}) ===", "big": True})
 
@@ -440,6 +474,8 @@ def main():
                 teleport(area, rec)
                 rec({"note": f"[{LABEL[area]}] 開始採集", "big": True})
                 img = shot() if MEASURE else None
+                if area == "village" and not args.no_pearl:
+                    img = pearl(rec, img)      # 冷卻沒到會自己跳過，不影響路線
                 for i, act in enumerate(ROUTES[area], 1):
                     if act[0] == "REST":
                         img = rest(rec, img, LABEL[area])

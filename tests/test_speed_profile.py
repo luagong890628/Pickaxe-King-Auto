@@ -179,5 +179,52 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.route_act(cf.ROUTES['village'][11]), ('N', 150.0, None))
 
 
+class PearlTest(unittest.TestCase):
+    """珍珠：往西 1080 → 點 (721,1839) → 往東 1080 回原位；冷卻 10 分鐘。"""
+
+    def setUp(self):
+        self.saved = cf._pearl_at
+        cf._pearl_at = 0.0
+
+    def tearDown(self):
+        cf._pearl_at = self.saved
+
+    def _run(self):
+        calls = []
+
+        def leg(img, d, px, rec, label, **kw):
+            calls.append((d, px, label, kw.get('drag_len')))
+            return img
+
+        with (patch.object(cf, 'leg', side_effect=leg),
+              patch.object(cf.adb, 'tap') as tap,
+              patch.object(cf.time, 'sleep')):
+            cf.pearl(lambda o: None, None)
+        return calls, tap
+
+    def test_first_time_takes_pearl_and_returns(self):
+        calls, tap = self._run()
+        self.assertEqual([(d, px) for d, px, _, _ in calls],
+                         [('L', cf.PEARL_WEST), ('R', cf.PEARL_EAST)])
+        # 去程和回程距離必須相同，才會回到傳送落點
+        self.assertEqual(cf.PEARL_WEST, cf.PEARL_EAST)
+        tap.assert_called_once_with(*cf.REST_TAP)
+        self.assertGreater(cf._pearl_at, 0)
+
+    def test_skips_while_cooling_down(self):
+        cf._pearl_at = cf.time.time()
+        calls, tap = self._run()
+        self.assertEqual(calls, [])
+        tap.assert_not_called()
+
+    def test_takes_again_after_cooldown(self):
+        cf._pearl_at = cf.time.time() - (cf.PEARL_COOLDOWN + 1)
+        calls, _ = self._run()
+        self.assertEqual(len(calls), 2)
+
+    def test_cooldown_is_ten_minutes(self):
+        self.assertEqual(cf.PEARL_COOLDOWN, 600.0)
+
+
 if __name__ == '__main__':
     unittest.main()
