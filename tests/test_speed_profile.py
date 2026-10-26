@@ -177,7 +177,7 @@ class PerLegSettleTest(unittest.TestCase):
 
     def test_start_route_is_prefix_plus_village_tail(self):
         self.assertEqual([a[:2] for a in cf.ROUTES['start'][:4]],
-                         [('N', 425.0), ('REST',), ('L', 150.0), ('L', 300.0)])
+                         [('N', 450.0), ('REST',), ('L', 150.0), ('L', 300.0)])
         self.assertEqual(cf.ROUTES['start'][4:], cf.VILLAGE[3:])
 
     def test_start_after_rest_is_fast_then_slow(self):
