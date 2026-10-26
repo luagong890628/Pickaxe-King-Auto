@@ -6,16 +6,16 @@ import cycle_fixed as cf
 
 class NextStopTest(unittest.TestCase):
     def test_first_pass_visits_every_zone_once_in_order(self):
-        # 都沒去過 → 依 REFRESH 的宣告順序：小村莊 → 起始之地 → 農場
+        # 都沒去過 → 依三個主區的宣告順序；島嶼只由 filler 明確選擇
         last = {}
         now = 1000.0
         got = []
-        for _ in range(len(cf.REFRESH)):
+        for _ in range(3):
             area, wait = cf.next_stop(now, last)
             self.assertEqual(wait, 0.0)
             got.append(area)
             last[area] = now
-        self.assertEqual(got, list(cf.REFRESH))
+        self.assertEqual(got, ["village", "start", "farm"])
 
     def test_skips_zone_that_is_still_refreshing(self):
         # 小村莊、起始之地剛採完（還要等 50 秒），農場早就好了 → 只能去農場
@@ -42,6 +42,15 @@ class NextStopTest(unittest.TestCase):
         area, wait = cf.next_stop(10.0, {"village": 0.0, "start": 0.0, "farm": 0.0})
         self.assertIn(area, ("village", "start"))
         self.assertAlmostEqual(wait, cf.REFRESH[area] - 10.0)
+
+    def test_village_anchor_cannot_bypass_village_refresh(self):
+        area, wait = cf.next_stop(
+            1099.0,
+            {"village": 1000.0, "start": 1000.0, "farm": 0.0},
+            village_first_cut=1000.0,
+        )
+        self.assertNotEqual(area, "village")
+        self.assertEqual(wait, 0.0)
 
     def test_every_route_has_a_refresh_entry(self):
         # 加新場地時忘了在 REFRESH 登記 → 排程器永遠不會排它，這裡擋下來

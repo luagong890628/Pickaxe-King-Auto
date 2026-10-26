@@ -29,6 +29,7 @@ class TestRunControl(unittest.TestCase):
                 with (patch('sys.argv', ['cycle_fixed.py'] + args),
                       patch.object(cf.time, 'time', side_effect=lambda: clock[0]),
                       patch.object(cf, 'teleport', side_effect=teleport),
+                      patch.object(cf, 'pearl', side_effect=lambda rec, img: img),
                       patch.object(cf, 'leg', return_value=None),
                       patch.object(cf, 'rest', return_value=None),
                       contextlib.redirect_stdout(io.StringIO())):

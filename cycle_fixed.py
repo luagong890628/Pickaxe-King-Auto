@@ -116,7 +116,7 @@ SETTLE_LEGS = {
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
 VERBOSE = False        # False＝console 只印大項目（輪次、傳送、休息）；log.jsonl 一律記全部
 MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
-ISLAND_RANDOM = False  # True＝空檔時在同批可去的島裡隨機挑（預設照優先序）
+
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
@@ -247,6 +247,11 @@ START_PREFIX = [
 # 四個島**布局相同**，只有傳送落點不同 → 每島各自一份路線，靠實走慢慢調。
 # 路線還空著的島排程器會自動跳過（不會傳送過去發呆）。
 ISLANDS = ("ice", "shark", "duck", "truffle")
+ISLAND_WEIGHTS = {"ice": 30, "shark": 25, "duck": 25, "truffle": 20}
+ISLAND_ENTRY_LEGS = 2
+ISLAND_MAX_LAPS = 4
+VILLAGE_FIRST_CUT_INTERVAL = 105.0
+
 ISLAND_LABEL = {"ice": "冰雪魔像島", "shark": "鯊魚島",
                 "duck": "鴨子島", "truffle": "松露島"}
 ISLAND_ROUTES = {
@@ -293,41 +298,69 @@ def _overdue(area, now, last):
     return (now - last.get(area, float("-inf"))) / r
 
 
-def pick_island(now, last):
-    """多餘時間才去的島嶼：回傳島名或 None。
+def eligible_islands(used):
+    """Return completed, non-empty islands not used in this filler window."""
+    return [a for a in ISLANDS if a not in used and ROUTES.get(a)]
 
-    只挑「路線已經填好」的島（空的＝還沒調好，傳送過去會發呆）。
-    預設照 ISLANDS 的順序＝優先序（冰雪魔像 > 鯊魚島 > 鴨子島 > 松露島）；
-    ISLAND_RANDOM=True 時在同批可去的島裡隨機挑一個。
-    """
-    cands = [a for a in ISLANDS if ROUTES.get(a) and _ready_at(a, last) <= now]
-    if not cands:
+
+def choose_island(used):
+    """Weighted choice among unused, route-validated islands."""
+    candidates = eligible_islands(used)
+    if not candidates:
         return None
-    return random.choice(cands) if ISLAND_RANDOM else cands[0]
+    return random.choices(candidates,
+                          weights=[ISLAND_WEIGHTS[a] for a in candidates], k=1)[0]
 
 
-def next_stop(now, last):
+def island_actions(area):
+    """Yield one entry (two gestures), then at most four full laps."""
+    route = ROUTES[area]
+    yield from route[:ISLAND_ENTRY_LEGS]
+    loop = route[ISLAND_ENTRY_LEGS:]
+    for _ in range(ISLAND_MAX_LAPS):
+        yield from loop
+
+
+def should_return_after_gesture(now, deadline, travel_reserve):
+    """Check only between gestures; an already-sent gesture is never split."""
+    return now + travel_reserve >= deadline
+
+
+def primary_cycle_limit(cycles):
+    """--cycles counts the three primary areas, never island filler routes."""
+    return None if cycles is None else cycles * 3
+
+
+def next_stop(now, last, village_first_cut=None):
     """排程器：回傳 (地區, 還要等幾秒)。等 0 表示現在就可以去。
 
     兩層：
     1. **主區**（小村莊／起始之地／農場）先顧，只挑已經刷新的，
        並優先挑**超過自己週期比例最多**的那個（用比例而非絕對秒數，
        否則一趟走得比刷新還久的地區會永遠最超時、把其他區餓死）。
-    2. 主區全都在刷新 → 這是**空檔**，拿去打島嶼（見 pick_island）。
+    2. 主區全都在刷新 → 這是**空檔**，由主迴圈交給島嶼補空檔。
     3. 連島都不能去 → 回傳最快好的主區 + 要等多久。
 
     last[area] = 上一次「開始採集」的時刻；沒去過視為 -inf（永遠最優先）。
     """
     main = [a for a in REFRESH if a not in ISLANDS]
     ready = [a for a in main if _ready_at(a, last) <= now]
+    if village_first_cut is not None:
+        village_ready = village_first_cut + VILLAGE_FIRST_CUT_INTERVAL
+        if now < village_ready:
+            ready = [a for a in ready if a != "village"]
+    unvisited_other = [a for a in main if a != "village" and a not in last]
+    if "village" in ready and village_first_cut is not None and not unvisited_other:
+        return "village", 0.0
     if ready:
         # 同分時取宣告順序前面那個 → 第一趟固定是 village → start → farm
         return max(ready, key=lambda a: (_overdue(a, now, last), -main.index(a))), 0.0
-    island = pick_island(now, last)
-    if island:
-        return island, 0.0
-    soonest = min(main, key=lambda a: _ready_at(a, last))
-    return soonest, _ready_at(soonest, last) - now
+    ready_at = {a: _ready_at(a, last) for a in main}
+    if village_first_cut is not None:
+        ready_at["village"] = max(ready_at["village"],
+                                   village_first_cut + VILLAGE_FIRST_CUT_INTERVAL)
+    soonest = min(main, key=lambda a: ready_at[a])
+    return soonest, max(0.0, ready_at[soonest] - now)
 
 
 # 起始之地後段與小村莊共用 → 停頓點直接沿用。
@@ -516,8 +549,81 @@ def pearl(rec, img, force=False):
     return img
 
 
+def run_area(area, rec, no_pearl=False):
+    """Teleport and complete one primary area without checking mid-gesture."""
+    teleport(area, rec)
+    rec({"note": f"[{LABEL[area]}] 開始採集", "big": True})
+    img = shot() if MEASURE else None
+    if area == "village" and not no_pearl:
+        img = pearl(rec, img)
+    first_cut = None
+    for i, act in enumerate(ROUTES[area], 1):
+        if area == "village" and i == 2:
+            # The interval starts immediately before village movement #2,
+            # the first harvesting gesture; movement #1 is unrelated travel.
+            first_cut = time.time()
+        if act[0] == "REST":
+            img = rest(rec, img, LABEL[area])
+        else:
+            d, px, _ = route_act(act)
+            img = leg(img, d, px, rec, LABEL[area],
+                      drag_len=route_drag(area, i),
+                      settle=route_settle(area, i))
+    if area in FILL_LEGS:
+        img = fill_cycle(area, rec, img)
+    return first_cut, img
+
+
+def _island_entry_reserve(area):
+    """Return the minimum time to enter, finish one gesture, and return."""
+    route = ROUTES[area]
+    entry = sum(
+        hold_ms(route_act(act)[1], route_act(act)[2] or 300)
+        for act in route[:ISLAND_ENTRY_LEGS]
+    ) / 1000
+    first_loop_leg = route_act(route[ISLAND_ENTRY_LEGS])
+    gesture = hold_ms(first_loop_leg[1], first_loop_leg[2] or 300) / 1000
+    now = time.time()
+    enter_cooldown = (
+        max(0.0, TELEPORT_COOLDOWN - (now - _last_teleport))
+        if _last_teleport else 0.0
+    )
+    teleport_wait = TELEPORT_WAIT * 3
+    elapsed_after_entry = teleport_wait + entry + gesture
+    return (enter_cooldown + elapsed_after_entry
+            + max(0.0, TELEPORT_COOLDOWN - elapsed_after_entry)
+            + teleport_wait)
+
+
+def run_island_filler(rec, deadline, used):
+    """Use each eligible island once until the village first-cut deadline.
+
+    A return check is made only after a completed physical gesture.  The
+    teleport reserve is conservative: it covers the 12s teleport cooldown;
+    the next teleport itself enforces any remaining cooldown.
+    """
+    did_work = False
+    while True:
+        area = choose_island(used)
+        if area is None or time.time() + _island_entry_reserve(area) >= deadline:
+            return did_work
+        used.add(area)
+        did_work = True
+        teleport(area, rec)
+        rec({"note": f"[{LABEL[area]}] 開始補空檔", "big": True})
+        img = shot() if MEASURE else None
+        for n, act in enumerate(island_actions(area), 1):
+            d, px, override = route_act(act)
+            img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
+                      drag_len=override if override is not None else 300,
+                      settle=0)
+            if should_return_after_gesture(
+                    time.time(), deadline, TELEPORT_COOLDOWN + TELEPORT_WAIT * 3):
+                return did_work
+
+
 def main():
-    global MEASURE, VERBOSE, SPEED_SCALE, ISLAND_RANDOM
+    global MEASURE, VERBOSE, SPEED_SCALE
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=None,
                     help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
@@ -527,8 +633,7 @@ def main():
                     help="每輪之間額外等幾秒（預設 0：靠林內慢走控制週期）")
     ap.add_argument("--verbose", action="store_true",
                     help="console 也印每一段（預設只印輪次、傳送、休息與錯誤）")
-    ap.add_argument("--island-random", action="store_true",
-                    help="空檔打島嶼時，在同批可去的島裡隨機挑（預設照優先序 冰雪魔像>鯊魚>鴨子>松露）")
+
     ap.add_argument("--no-pearl", action="store_true",
                     help="不拿珍珠（預設每超過 10 分鐘冷卻就去拿一次）")
     ap.add_argument("--pearl-only", action="store_true",
@@ -541,7 +646,7 @@ def main():
     args = ap.parse_args()
     MEASURE = args.measure
     VERBOSE = args.verbose
-    ISLAND_RANDOM = args.island_random
+
     if args.speed_scale is not None:
         if args.speed_scale <= 0:
             ap.error("--speed-scale 必須大於 0")
@@ -584,8 +689,8 @@ def main():
             print(f"  {LABEL[a]:8s} 刷新 {r:5.0f}s"
                   + ("（隨時可去）" if r <= 0 else "") + mark)
         print(f"  {'珍珠':8s} 冷卻 {PEARL_COOLDOWN:5.0f}s（附掛在小村莊，不會單獨跑一趟）")
-        print(f"  島嶼優先序：{' > '.join(LABEL[a] for a in ISLANDS)}"
-              f"{'（隨機挑）' if ISLAND_RANDOM else '（照順序）'}")
+        print(f"  島嶼加權抽選：冰雪魔像:鯊魚:鴨子:松露 = "
+              f"{ISLAND_WEIGHTS['ice']}:{ISLAND_WEIGHTS['shark']}:{ISLAND_WEIGHTS['duck']}:{ISLAND_WEIGHTS['truffle']}")
         print(f"　固定座標：愛心{HEART} 休息{REST_TAP}")
         return
 
@@ -645,17 +750,29 @@ def main():
             log.close()
         return
 
-    # --cycles N ＝ 走完 N 趟「每個可用地區各採一次」的份量，保留原本語意。
-    # 「可用」＝主區 + 路線已填好的島；路線還空著的島不算，不然 --cycles 會多等好幾站。
-    usable = [a for a in REFRESH if a not in ISLANDS or ROUTES.get(a)]
-    step_limit = None if args.cycles is None else args.cycles * len(usable)
+    # --cycles counts only the primary village/start/farm stations.
+    step_limit = primary_cycle_limit(args.cycles)
     last_visit = {}          # area → 上一次開始採集的時刻
     steps = 0
+    last_first_cut = None
+    island_used = set()
 
     try:
         while time.time() < deadline and (step_limit is None or steps < step_limit):
-            area, wait = next_stop(time.time(), last_visit)
+            now = time.time()
+            area, wait = next_stop(now, last_visit, last_first_cut)
             if wait > 0:
+                if last_first_cut is not None:
+                    filler_deadline = min(last_first_cut + VILLAGE_FIRST_CUT_INTERVAL,
+                                          deadline)
+                    if now < filler_deadline:
+                        did_work = run_island_filler(rec, filler_deadline, island_used)
+                        if did_work:
+                            continue
+                        remaining = min(filler_deadline, deadline) - time.time()
+                        if remaining > 0:
+                            time.sleep(min(1.0, remaining))
+                        continue
                 rec({"note": f"{LABEL[area]} 還沒刷新，等 {wait:.0f}s", "big": True,
                      "show": f"等 {LABEL[area]} 刷新 {wait:.0f}s"})
                 end = min(time.time() + wait, deadline)
@@ -670,21 +787,10 @@ def main():
             rec({"note": f"=== 第 {steps} 站：{LABEL[area]} ({time.strftime('%H:%M')}) ===",
                  "big": True, "show": f"=== 第 {steps} 站：{LABEL[area]} ==="})
 
-            teleport(area, rec)
-            rec({"note": f"[{LABEL[area]}] 開始採集", "big": True})
-            img = shot() if MEASURE else None
-            if area == "village" and not args.no_pearl:
-                img = pearl(rec, img)      # 冷卻沒到會自己跳過，不影響路線
-            for i, act in enumerate(ROUTES[area], 1):
-                if act[0] == "REST":
-                    img = rest(rec, img, LABEL[area])
-                else:
-                    d, px, _ = route_act(act)
-                    img = leg(img, d, px, rec, LABEL[area],
-                              drag_len=route_drag(area, i),
-                              settle=route_settle(area, i))
-            if area in FILL_LEGS:
-                img = fill_cycle(area, rec, img)
+            first_cut, _ = run_area(area, rec, args.no_pearl)
+            if first_cut is not None:
+                last_first_cut = first_cut
+                island_used.clear()
 
             if args.wait:
                 time.sleep(args.wait)

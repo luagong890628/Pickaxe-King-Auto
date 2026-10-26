@@ -24,7 +24,10 @@ class SpeedProfileTest(unittest.TestCase):
                 os.chdir(tmp)
                 with (patch('sys.argv', ['cycle_fixed.py', '--cycles', '1']),
                       patch.object(cf.time, 'time', side_effect=lambda: clock[0]),
+                      patch.object(cf.time, 'sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
                       patch.object(cf, 'teleport'), patch.object(cf, 'rest'),
+                      patch.object(cf, 'pearl', side_effect=lambda rec, img: img),
+                      patch.object(cf, 'run_island_filler', return_value=False),
                       patch.object(cf, 'leg', side_effect=leg),
                       patch.object(cf, 'shot', side_effect=AssertionError('不應截圖')),
                       contextlib.redirect_stdout(io.StringIO())):
@@ -84,7 +87,7 @@ class SpeedProfileTest(unittest.TestCase):
         self.assertIn(f'拖 {cf.ENTRY_DRAG}px', text)
         self.assertIn(f'拖 {cf.FOREST_DRAG}px', text)
         sections = text.split('\n[')[1:]
-        self.assertEqual(len(sections), 3)
+        self.assertEqual(len(sections), len(cf.ROUTES))
         for area, section in zip(('village', 'start', 'farm'), sections):
             for i, act in enumerate(cf.ROUTES[area], 1):
                 if act[0] == 'REST':
