@@ -40,7 +40,7 @@ class SpeedProfileTest(unittest.TestCase):
         for (d, px, kw), (area, i, act) in zip(calls, expected):
             self.assertEqual((d, px), cf.route_act(act)[:2])
             self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), cf.route_drag(area, i))
-            self.assertEqual(kw['settle'], 0)
+            self.assertEqual(kw['settle'], cf.SETTLE)
 
     def test_farm_route_distances_and_per_leg_drag(self):
         self.assertEqual(cf.ROUTES['farm'],
@@ -58,9 +58,9 @@ class SpeedProfileTest(unittest.TestCase):
         with patch.object(cf, 'leg', side_effect=leg):
             cf.fill_cycle('farm', lambda o: None, None, pairs=2)
 
-        # 一組＝第 3 段（東 700）＋第 4 段（西 700），拖曳都 300、不停頓
+        # 一組＝第 3 段（東 700）＋第 4 段（西 700），拖曳都 300、到點停頓同 SETTLE
         self.assertEqual([(d, px, kw['drag_len'], kw['settle']) for d, px, kw in calls],
-                         [('R', 700.0, 300, 0), ('L', 700.0, 300, 0)] * 2)
+                         [('R', 700.0, 300, cf.SETTLE), ('L', 700.0, 300, cf.SETTLE)] * 2)
 
     def test_farm_fill_defaults_to_configured_pair_count(self):
         with patch.object(cf, 'leg') as leg:
