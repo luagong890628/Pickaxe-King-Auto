@@ -93,7 +93,7 @@ class SpeedProfileTest(unittest.TestCase):
                 d, px = cf.route_act(act)[:2]
                 drag = cf.route_drag(area, i)
                 holds = str(cf.hold_ms(px, drag))
-                self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms', section)
+                self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag:g}px／按住 {holds}ms', section)
             self.assertIn(str(cf.TILE[area]), section)
         self.assertIn(f'愛心{cf.HEART}', text)
         self.assertIn(f'休息{cf.REST_TAP}', text)
@@ -154,9 +154,14 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.route_settle('village', 1), 0.0)
         self.assertEqual(cf.route_settle('village', 18), 0.0)
 
-    def test_listed_leg_pauses(self):
+    def test_slowed_legs_use_drag_160(self):
+        # 2026-10-26：原本靠停頓補刀的段，改成降速（拖 160）取代停頓
         for n in (3, 5, 7, 12, 14, 15, 17):
-            self.assertEqual(cf.route_settle('village', n), 0.5)
+            self.assertEqual(cf.route_drag('village', n), 160)
+            self.assertEqual(cf.route_settle('village', n), 0.0)
+        # 其餘林內段維持 200
+        for n in (4, 6, 8, 9, 10, 11, 13, 16, 18):
+            self.assertEqual(cf.route_drag('village', n), cf.FOREST_DRAG)
 
     def test_start_shares_village_tail_pauses(self):
         # 起始之地第 5 段起＝小村莊第 4 段起 → 停頓點必須一致（段號平移 1：前段多了 REST）
@@ -184,7 +189,7 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.ROUTES['start'][2][1] + cf.ROUTES['start'][3][1], 450.0)
 
     def test_leg_12_north_is_longer(self):
-        self.assertEqual(cf.route_act(cf.ROUTES['village'][11]), ('N', 150.0, None))
+        self.assertEqual(cf.route_act(cf.ROUTES['village'][11])[:2], ('N', 150.0))
 
 
 class PearlTest(unittest.TestCase):
