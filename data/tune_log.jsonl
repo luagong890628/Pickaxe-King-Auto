@@ -206,3 +206,5 @@
 {"dir": "N", "px": 850.0, "measured": [0, -856], "source": "template", "score": 0.97, "drag": 1800, "area": "village", "t": "2026-10-26 15:33:32"}
 {"dir": "N", "px": 600.0, "measured": [0, -604], "source": "template", "score": 0.96, "drag": 1800, "area": "farm", "t": "2026-10-26 20:52:41"}
 {"dir": "L", "px": 350.0, "measured": [-348, 256], "source": "template", "score": 1.0, "drag": 150, "area": "farm", "t": "2026-10-26 20:52:44"}
+{"dir": "N", "px": 600.0, "measured": [0, -609], "source": "template", "score": 0.98, "drag": 1800, "area": "farm", "t": "2026-10-26 20:57:59"}
+{"dir": "L", "px": 350.0, "measured": [-348, 0], "source": "低信心", "score": 0.14, "drag": 150, "area": "farm", "t": "2026-10-26 20:58:02"}
