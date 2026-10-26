@@ -203,7 +203,7 @@ class PearlTest(unittest.TestCase):
     def tearDown(self):
         cf._pearl_at = self.saved
 
-    def _run(self):
+    def _run(self, force=False):
         calls = []
 
         def leg(img, d, px, rec, label, **kw):
@@ -213,7 +213,7 @@ class PearlTest(unittest.TestCase):
         with (patch.object(cf, 'leg', side_effect=leg),
               patch.object(cf.adb, 'tap') as tap,
               patch.object(cf.time, 'sleep')):
-            cf.pearl(lambda o: None, None)
+            cf.pearl(lambda o: None, None, force=force)
         return calls, tap
 
     def test_first_time_takes_pearl_and_returns(self):
@@ -235,6 +235,14 @@ class PearlTest(unittest.TestCase):
         cf._pearl_at = cf.time.time() - (cf.PEARL_COOLDOWN + 1)
         calls, _ = self._run()
         self.assertEqual(len(calls), 2)
+
+    def test_force_ignores_cooldown(self):
+        # --pearl-only 測試落點時要能連續跑，所以 force=True 要無視冷卻
+        cf._pearl_at = cf.time.time()
+        calls, tap = self._run(force=True)
+        self.assertEqual([(d, px) for d, px, _, _ in calls],
+                         [('L', cf.PEARL_WEST), ('R', cf.PEARL_EAST)])
+        tap.assert_called_once_with(*cf.REST_TAP)
 
     def test_cooldown_is_ten_minutes(self):
         self.assertEqual(cf.PEARL_COOLDOWN, 600.0)

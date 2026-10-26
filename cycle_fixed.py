@@ -395,17 +395,19 @@ PEARL_DRAG = 720           # 珍珠去回程用最快（東/西向的拖曳硬�
 # 珍珠只是去拿東西、不需要邊走邊砍，所以不必跟林內一樣慢；
 # 1080px 用 720（794px/秒）只要 1.4 秒，用林內的 150（278px/秒）要 3.9 秒。
 PEARL_COOLDOWN = 600.0     # 冷卻 10 分鐘
+PEARL_TOLERANCE = 20.0     # --pearl-only 回歸驗證：出發點與回程點允許差幾 px 算「回到原位」
 _pearl_at = 0.0            # 上次拿到珍珠的時刻（0＝還沒拿過，第一輪一定去）
 
 
-def pearl(rec, img):
+def pearl(rec, img, force=False):
     """往西 1080 → 點珍珠 → 往東 1080 回原位。冷卻沒到就跳過、什麼都不做。
 
     用「距離上次拿到超過冷卻」判斷，不用「每 N 輪」：
     輪次長度會隨路線/速度變動，用輪數會在調整路線後失準。
+    force=True 則忽略冷卻（--pearl-only 專用：測試落點時要能連續跑）。
     """
     global _pearl_at
-    if _pearl_at and time.time() - _pearl_at < PEARL_COOLDOWN:
+    if not force and _pearl_at and time.time() - _pearl_at < PEARL_COOLDOWN:
         return img
     img = leg(img, "L", PEARL_WEST, rec, "珍珠去程", drag_len=PEARL_DRAG, settle=0)
     adb.tap(*REST_TAP)
@@ -429,6 +431,8 @@ def main():
                     help="console 也印每一段（預設只印輪次、傳送、休息與錯誤）")
     ap.add_argument("--no-pearl", action="store_true",
                     help="不拿珍珠（預設每超過 10 分鐘冷卻就去拿一次）")
+    ap.add_argument("--pearl-only", action="store_true",
+                    help="只走珍珠路線：傳送到小村莊 → 西 → 點珍珠 → 東 → 結束（忽略冷卻，測落點用）")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--measure", action="store_true",
                     help="每段量實際位移（每段多花約 0.8 秒截圖；調 px 時用）")
@@ -464,6 +468,9 @@ def main():
         print(f"珍珠：往西 {PEARL_WEST:.0f} → 點 {REST_TAP} → 往東 {PEARL_EAST:.0f}"
               f"（拖 {PEARL_DRAG}px → {speed_of(PEARL_DRAG):.1f}px/秒，"
               f"冷卻 {PEARL_COOLDOWN/60:.0f} 分鐘；第一輪一定拿）")
+        if args.pearl_only:
+            print("※ --pearl-only：只傳送到小村莊走珍珠，忽略冷卻，不走任何採集路段")
+            return
         print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（不加移動後停頓）'}"
               f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
@@ -484,6 +491,46 @@ def main():
     t0 = time.time()
     deadline = float("inf") if args.minutes is None else t0 + args.minutes * 60
     cycles = 0
+
+    if args.pearl_only:
+        # 只走珍珠：傳送到小村莊落點 → 西 → 點珍珠 → 東 → 結束。
+        # 忽略冷卻（測試落點時要能連續跑），不走任何採集路段。
+        # **回歸驗證**：去程/回程各 1080px 太長（> 螢幕寬），逐段量位移一定量不到；
+        # 所以改成「出發前拍一張、回來再拍一張」直接比對，位移 ≈0 就代表精準回到落點。
+        rec({"note": "珍珠單走（忽略冷卻）", "big": True, "show": "珍珠單走（忽略冷卻）"})
+        try:
+            teleport("village", rec)
+            before = shot()
+            pearl(rec, before, force=True)
+            # 只拍一張容易被動畫（落葉、水波、動物、獎勵提示）干擾而量不到，
+            # 所以最多重拍 3 次、取分數最高的那張；分數 <0.9 的結果一律不採信。
+            m = None
+            for _ in range(3):
+                m2 = measure.world_shift(before, shot())
+                if m2 and (m is None or m2[2] > m[2]):
+                    m = m2
+                if m and m[2] >= 0.9:
+                    break
+            if m is None:
+                rec({"note": "落點回歸：量不到", "big": True, "show": "落點回歸：量不到（換幀差異太大）"})
+            else:
+                dx, dy, score, src = m
+                off = math.hypot(dx, dy)
+                if score < 0.9:
+                    verdict = f"不可信（分數 {score:.2f} 太低）"
+                elif off <= PEARL_TOLERANCE:
+                    verdict = "回到原位"
+                else:
+                    verdict = f"偏 {off:.0f}px"
+                rec({"note": f"落點回歸：位移 ({dx:+.0f},{dy:+.0f})px 分數 {score:.2f}（{src}）→ {verdict}",
+                     "big": True,
+                     "show": f"落點回歸：位移 ({dx:+.0f},{dy:+.0f})px 分數 {score:.2f}（{src}）→ {verdict}"})
+        except KeyboardInterrupt:
+            rec({"note": "使用者停止（Ctrl+C）", "big": True, "show": "使用者停止（Ctrl+C）"})
+        finally:
+            rec({"note": "收工", "big": True, "show": "收工（珍珠單走）"})
+            log.close()
+        return
 
     try:
         while time.time() < deadline and (args.cycles is None or cycles < args.cycles):
