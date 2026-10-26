@@ -204,3 +204,5 @@
 {"dir": "L", "px": 250.0, "measured": [-364, 0], "source": "template", "score": 1.0, "drag": 85.0, "area": "village", "t": "2026-10-26 15:09:15"}
 {"dir": "R", "px": 250.0, "measured": [371, 0], "source": "template", "score": 0.99, "drag": 85.0, "area": "village", "t": "2026-10-26 15:09:23"}
 {"dir": "N", "px": 850.0, "measured": [0, -856], "source": "template", "score": 0.97, "drag": 1800, "area": "village", "t": "2026-10-26 15:33:32"}
+{"dir": "N", "px": 600.0, "measured": [0, -604], "source": "template", "score": 0.96, "drag": 1800, "area": "farm", "t": "2026-10-26 20:52:41"}
+{"dir": "L", "px": 350.0, "measured": [-348, 256], "source": "template", "score": 1.0, "drag": 150, "area": "farm", "t": "2026-10-26 20:52:44"}
