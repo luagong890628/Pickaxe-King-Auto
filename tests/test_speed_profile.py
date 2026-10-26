@@ -239,6 +239,15 @@ class PearlTest(unittest.TestCase):
     def test_cooldown_is_ten_minutes(self):
         self.assertEqual(cf.PEARL_COOLDOWN, 600.0)
 
+    def test_pearl_runs_at_max_horizontal_speed(self):
+        # 珍珠只是去拿東西、不用邊走邊砍 → 用東西向拖曳上限 720（794px/秒）
+        self.assertEqual(cf.PEARL_DRAG, 720)
+        calls, _ = self._run()
+        self.assertEqual([kw for _, _, _, kw in calls], [cf.PEARL_DRAG, cf.PEARL_DRAG])
+        # 比林內慢段快得多，而且不能超過東西向拖曳上限
+        self.assertGreater(cf.speed_of(cf.PEARL_DRAG), cf.speed_of(cf.FOREST_DRAG))
+        self.assertLessEqual(cf.PEARL_DRAG, cf.DRAG[0])
+
 
 if __name__ == '__main__':
     unittest.main()

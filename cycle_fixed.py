@@ -391,6 +391,9 @@ def fill_cycle(area, rec, img, pairs=None):
 # 點擊座標和小屋休息同一個（REST_TAP）；冷卻中點下去不會有反應（跟黃金樹一樣）。
 PEARL_WEST = 1080.0        # 往西走多遠（東西向拖曳上限 720px，1080 是分段走的距離，不是拖曳長度）
 PEARL_EAST = 1080.0        # 回程往東（= 西的距離，才會回到原位）
+PEARL_DRAG = 720           # 珍珠去回程用最快（東/西向的拖曳硬上限就是 720 → 794px/秒）
+# 珍珠只是去拿東西、不需要邊走邊砍，所以不必跟林內一樣慢；
+# 1080px 用 720（794px/秒）只要 1.4 秒，用林內的 150（278px/秒）要 3.9 秒。
 PEARL_COOLDOWN = 600.0     # 冷卻 10 分鐘
 _pearl_at = 0.0            # 上次拿到珍珠的時刻（0＝還沒拿過，第一輪一定去）
 
@@ -404,10 +407,10 @@ def pearl(rec, img):
     global _pearl_at
     if _pearl_at and time.time() - _pearl_at < PEARL_COOLDOWN:
         return img
-    img = leg(img, "L", PEARL_WEST, rec, "珍珠去程", drag_len=FOREST_DRAG, settle=0)
+    img = leg(img, "L", PEARL_WEST, rec, "珍珠去程", drag_len=PEARL_DRAG, settle=0)
     adb.tap(*REST_TAP)
     time.sleep(REST_WAIT)                    # 等拿取動畫
-    img = leg(img, "R", PEARL_EAST, rec, "珍珠回程", drag_len=FOREST_DRAG, settle=0)
+    img = leg(img, "R", PEARL_EAST, rec, "珍珠回程", drag_len=PEARL_DRAG, settle=0)
     _pearl_at = time.time()
     rec({"note": "拿珍珠", "big": True, "show": "拿珍珠（冷卻 10 分鐘）"})
     return img
@@ -459,7 +462,8 @@ def main():
                 print(f"  補時：再多 {FILL_PAIRS} 組第 "
                       f"{'、'.join(str(n) for n in FILL_LEGS[area])} 段來回（固定組數，不看時間）")
         print(f"珍珠：往西 {PEARL_WEST:.0f} → 點 {REST_TAP} → 往東 {PEARL_EAST:.0f}"
-              f"（冷卻 {PEARL_COOLDOWN/60:.0f} 分鐘；第一輪一定拿）")
+              f"（拖 {PEARL_DRAG}px → {speed_of(PEARL_DRAG):.1f}px/秒，"
+              f"冷卻 {PEARL_COOLDOWN/60:.0f} 分鐘；第一輪一定拿）")
         print(f"\n每輪結束{'額外等 ' + str(int(args.wait)) + ' 秒' if args.wait else '立刻下一輪（不加移動後停頓）'}"
               f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
         return
