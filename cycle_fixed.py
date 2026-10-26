@@ -42,10 +42,19 @@ DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（2
 # 林外（進場段）用最快：拖 1800 已達 903px/秒，再拉到 2200 平台只多 1.8%（2026-10-26 實測）
 ENTRY_DRAG = 1800
 ENTRY_WEST_DRAG = 250  # 進場第二個移動段往西時放慢（150px 短腿求精度，不用滿舵）
-FOREST_DRAG = 200      # 林內（372px/秒）。2026-10-26 由 85（155px/秒）調快，暫定值。
+FOREST_DRAG = 200      # 林內（372px/秒）。2026-10-26 由 85（155px/秒）調快。
 # 林內速度的**真正上限不是 px 精度，是揮鎬頻率**：拖 250（466px/秒）實跑時
 # 「有些樹還沒砍掉就走過去了」，等於白走。拖 200 只比 250 慢 20%（小村莊全程
-# 11.0s→12.7s），但留給揮鎬的時間夠。要再快之前，先確認樹都砍得完。
+# 11.0s→12.7s），但留給揮鎬的時間夠 → 使用者 2026-10-26 確認「200 就都會砍到了」。
+# 拖 180（334px/秒、13.4s）更慢但沒有多砍到東西，不採用。
+#
+# **px 和拖曳是兩個獨立旋鈕，不要拿一個補另一個**（2026-10-26 使用者提問）：
+#   同一條腿的揮鎬次數 ≈ 腿長 ÷ 速度 ÷ 揮鎬週期。
+#   - 把 px 加長 → 停留時間變長、確實多砍幾刀，但**終點位移**，後續每段都繼承偏移，
+#     開環路線沒有視覺修正，偏移收不回來 → px 只能改幾何，不能用來修速度。
+#   - 把拖曳變小 → 停留時間變長、終點不變 → 這才是修「漏砍」的正確槓桿。
+#   若只有某一小段漏砍，別動全域值，直接在該段寫第三個元素覆寫（見 route_act）：
+#       ("L", 300.0, 150)   ← 這段拖 150，其餘仍用 FOREST_DRAG
 FARM_DRAG = 300        # 自由農場A 林內拖曳（第2步起；進場第1步仍用 ENTRY_DRAG）
 ENTRY_LEGS = {"village": (1, 2), "start": (1,), "farm": (1,)}
 # 為什麼不是 400（488px/秒）：2026-10-22 交替實測同一 400px 腿，
@@ -136,6 +145,7 @@ MIN_HOLD_MS = 110
 # ---- 路線（照順序走；每項是 (方向, px)，("REST",) = 點固定座標休息）----
 # 要調走路只改這裡；一段一個方向，距離直接用 px。
 # 兩區使用獨立清單：小村莊與起始之地可分開調整，不連動距離。
+# 某一小段漏砍樹時，可在該段加第三個元素覆寫拖曳：(方向, px, 拖曳)，只影響那一段。
 VILLAGE = [
     ("N", 1000.0),     # 1 往北進林（2026-10-26 由 850 改 1000，使用者現場確認）
     ("L", 150.0),      # 2 往西（使用者指定）
@@ -185,11 +195,30 @@ ROUTES = {
 LABEL = {"village": "小村莊", "start": "起始之地", "farm": "自由農場A"}
 
 
+def route_act(act):
+    """路線項目正規化 → (方向, px, 拖曳覆寫或 None)。
+
+    路線可以寫成兩種形式：
+        ("N", 1000.0)            用該區預設拖曳（route_drag 的公式決定）
+        ("N", 1000.0, 150)       這一段強制用拖 150（其餘不動）
+    覆寫的用途：**只有某一小段漏砍時，只放慢那一段**，不要為了兩棵樹把整區變慢。
+    """
+    if act[0] == "REST":
+        return "REST", 0.0, None
+    if len(act) >= 3:
+        return act[0], float(act[1]), float(act[2])
+    return act[0], float(act[1]), None
+
+
 def route_drag(area, leg_number):
+    """這一段用多長的拖曳。優先序：單段覆寫 > 該區規則。"""
+    d, _, override = route_act(ROUTES[area][leg_number - 1])
+    if override is not None:
+        return override
     if area == "farm" and leg_number not in ENTRY_LEGS["farm"]:
         return FARM_DRAG
     if leg_number in ENTRY_LEGS[area]:
-        return ENTRY_WEST_DRAG if ROUTES[area][leg_number - 1][0] == "L" else ENTRY_DRAG
+        return ENTRY_WEST_DRAG if d == "L" else ENTRY_DRAG
     return FOREST_DRAG
 
 # 按住時間校正（2026-10-22 多場實測，固定起點、同方向來回各 5 次）
@@ -291,7 +320,7 @@ def fill_cycle(area, rec, img, pairs=None):
     legs = FILL_LEGS[area]
     for _ in range(FILL_PAIRS if pairs is None else pairs):
         for n in legs:
-            d, px = ROUTES[area][n - 1]
+            d, px, _ = route_act(ROUTES[area][n - 1])
             img = leg(img, d, px, rec, f"{LABEL[area]}補時{n}",
                       drag_len=route_drag(area, n), settle=0)
     return img
@@ -329,9 +358,10 @@ def main():
                 if act[0] == "REST":
                     print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）")
                     continue
-                d, px = act
+                d, px, override = route_act(act)
                 drag = route_drag(area, i)
-                print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {hold_ms(px, drag)}ms")
+                tag = f"（單段覆寫 {override:g}）" if override is not None else ""
+                print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {hold_ms(px, drag)}ms{tag}")
             if area in FILL_LEGS:
                 print(f"  補時：再多 {FILL_PAIRS} 組第 "
                       f"{'、'.join(str(n) for n in FILL_LEGS[area])} 段來回（固定組數，不看時間）")
@@ -369,7 +399,8 @@ def main():
                     if act[0] == "REST":
                         img = rest(rec, img, LABEL[area])
                     else:
-                        img = leg(img, act[0], act[1], rec, LABEL[area],
+                        d, px, _ = route_act(act)
+                        img = leg(img, d, px, rec, LABEL[area],
                                   drag_len=route_drag(area, i),
                                   settle=0)
                 if area in FILL_LEGS:

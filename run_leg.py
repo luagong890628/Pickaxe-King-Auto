@@ -170,7 +170,7 @@ def main():
             img = cf.rest(rec_plain, img, cf.LABEL[args.area])
             time.sleep(settle_for(n))
             continue
-        d, px = act
+        d, px, _ = cf.route_act(act)
         # 路線段照主循環的分段速度；--drag 覆寫或 --walk 臨時段才用通用 DRAG_LEN
         drag_len = cf.route_drag(args.area, n) if not args.walk and args.drag is None else None
         cur_drag[0] = cf.DRAG_LEN if drag_len is None else drag_len

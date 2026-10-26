@@ -38,7 +38,7 @@ class SpeedProfileTest(unittest.TestCase):
                      for _ in range(cf.FILL_PAIRS) for n in cf.FILL_LEGS['farm']]
         self.assertEqual(len(calls), len(expected))
         for (d, px, kw), (area, i, act) in zip(calls, expected):
-            self.assertEqual((d, px), act)
+            self.assertEqual((d, px), cf.route_act(act)[:2])
             self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), cf.route_drag(area, i))
             self.assertEqual(kw['settle'], 0)
 
@@ -89,13 +89,56 @@ class SpeedProfileTest(unittest.TestCase):
                 if act[0] == 'REST':
                     self.assertIn(f'{i}. 休息（點 {cf.REST_TAP}，等 {cf.REST_WAIT}s）', section)
                     continue
-                d, px = act
+                d, px = cf.route_act(act)[:2]
                 drag = cf.route_drag(area, i)
                 holds = str(cf.hold_ms(px, drag))
                 self.assertIn(f'{i}. {cf.NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {holds}ms', section)
             self.assertIn(str(cf.TILE[area]), section)
         self.assertIn(f'愛心{cf.HEART}', text)
         self.assertIn(f'休息{cf.REST_TAP}', text)
+
+
+class PerLegDragOverrideTest(unittest.TestCase):
+    """單段拖曳覆寫：只放慢漏砍的那一段，其餘維持該區預設。"""
+
+    def setUp(self):
+        self.saved = {a: list(cf.ROUTES[a]) for a in ('village', 'start', 'farm')}
+
+    def tearDown(self):
+        for a, v in self.saved.items():
+            cf.ROUTES[a][:] = v
+
+    def test_two_element_leg_has_no_override(self):
+        self.assertEqual(cf.route_act(('N', 1000.0)), ('N', 1000.0, None))
+        self.assertEqual(cf.route_drag('village', 1), cf.ENTRY_DRAG)
+
+    def test_three_element_leg_overrides_route_drag(self):
+        # 第 3 段（林內，預設拖 FOREST_DRAG）改成只拖 150
+        cf.ROUTES['village'][2] = ('L', 300.0, 150)
+        self.assertEqual(cf.route_act(cf.ROUTES['village'][2]), ('L', 300.0, 150.0))
+        self.assertEqual(cf.route_drag('village', 3), 150)
+        # 隔壁段不受影響
+        self.assertEqual(cf.route_drag('village', 4), cf.FOREST_DRAG)
+
+    def test_override_beats_entry_drag(self):
+        cf.ROUTES['village'][0] = ('N', 1000.0, 600)
+        self.assertEqual(cf.route_drag('village', 1), 600)
+
+    def test_rest_entry_normalizes(self):
+        self.assertEqual(cf.route_act(('REST',)), ('REST', 0.0, None))
+
+    def test_override_is_used_by_leg_call(self):
+        cf.ROUTES['village'][2] = ('L', 300.0, 150)
+        calls = []
+
+        def leg(img, d, px, rec, label, **kwargs):
+            calls.append((d, px, kwargs['drag_len']))
+
+        with patch.object(cf, 'leg', side_effect=leg):
+            for i, act in enumerate(cf.ROUTES['village'], 1):
+                d, px, _ = cf.route_act(act)
+                cf.leg(None, d, px, lambda o: None, 'v', drag_len=cf.route_drag('village', i))
+        self.assertEqual(calls[2], ('L', 300.0, 150))
 
 
 if __name__ == '__main__':

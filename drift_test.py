@@ -23,7 +23,7 @@ def expected_shift(area: str) -> tuple[float, float]:
     for act in cf.ROUTES[area]:
         if act[0] == "REST":
             continue
-        d, px = act
+        d, px, _ = cf.route_act(act)
         vx, vy = cf.DIRS[d]
         ex += vx * px
         ey += vy * px
@@ -52,7 +52,9 @@ def main() -> int:
                 cf.rest(lambda o: None, None, cf.LABEL[args.area])
                 time.sleep(settle)
             else:
-                cf.leg(None, act[0], act[1], lambda o: None, f"{cf.LABEL[args.area]}[{n}]",
+                d, px, _ = cf.route_act(act)
+                cf.leg(None, d, px, lambda o: None, f"{cf.LABEL[args.area]}[{n}]",
+                       drag_len=cf.route_drag(args.area, n),
                        settle=settle)
         time.sleep(1.2)
         b = cf.shot()
