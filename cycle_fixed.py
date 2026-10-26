@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import time
 from pathlib import Path
 
@@ -23,7 +24,15 @@ HEART = (1340, 1670)
 MENU_SCROLL_FROM = (720, 850)
 MENU_SCROLL_TO = (720, 2250)
 MENU_SCROLL_MS = 300
-TILE = {"farm": (350, 800), "village": (350, 1810), "start": (720, 1810)}
+# ---- 傳送選單座標 ----
+# 2026-10-26 從實機選單截圖換算（畫面 1440×3120，截圖 500×1080 → ×2.88／×2.889）。
+# 已實測驗證：ice (1066,1017) 確實傳到冰雪魔像島（雪地＋白色魔像）。
+TILE = {"farm": (350, 800), "village": (350, 1810), "start": (720, 1810),
+        # 四個島在選單右上／右中兩排（島嶼布局相同，只有傳送落點不同）
+        "ice": (1066, 1077),      # 冰雪魔像島（選單右上）
+        "shark": (711, 1017),     # 鯊魚島（選單中上）
+        "duck": (1066, 1378),     # 鴨子島（選單右中）
+        "truffle": (711, 1378)}   # 松露島（選單中中）
 REST_TAP = (721, 1839)                                  # 帳篷休息對話框中心
 
 # 傳送石冷卻（使用者 2026-10-26 確認 12 秒）：冷卻中再點不會傳送，選單會留在畫面上，
@@ -107,6 +116,7 @@ SETTLE_LEGS = {
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
 VERBOSE = False        # False＝console 只印大項目（輪次、傳送、休息）；log.jsonl 一律記全部
 MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
+ISLAND_RANDOM = False  # True＝空檔時在同批可去的島裡隨機挑（預設照優先序）
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
@@ -231,13 +241,29 @@ START_PREFIX = [
     ("L", 300.0, 120), # 4 往西（慢：拖 120，＝小村莊第 3 段；2026-10-26 使用者指定同步）
 ]
 
+# ---- 島嶼：多餘時間（主三區都在刷新）才去 ----
+# 使用者 2026-10-26：鯊魚島、松露島、冰雪魔像島、鴨子島「可以用隨機」，
+# 但優先序是 冰雪魔像 > 鯊魚島 > 鴨子島 > 松露島 → ISLANDS 的順序就是優先序。
+# 四個島**布局相同**，只有傳送落點不同 → 每島各自一份路線，靠實走慢慢調。
+# 路線還空著的島排程器會自動跳過（不會傳送過去發呆）。
+ISLANDS = ("ice", "shark", "duck", "truffle")
+ISLAND_LABEL = {"ice": "冰雪魔像島", "shark": "鯊魚島",
+                "duck": "鴨子島", "truffle": "松露島"}
+ISLAND_ROUTES = {
+    "ice": [("N", 1000.0, 300), ("L", 200.0, 300), ("S", 800.0, 300), ("R", 400.0, 300), ("N", 800.0, 300), ("L", 400.0, 300)],  # 進場北1000、西200；循環南800、東400、北800、西400
+    "shark": [],      # 待填：鯊魚島
+    "duck": [],       # 待填：鴨子島
+    "truffle": [],    # 待填：松露島
+}
+
 ROUTES = {
     "village": VILLAGE,
     "start": START_PREFIX + VILLAGE[3:],
     "farm": [("N", 600.0), ("L", 350.0), ("R", 700.0), ("L", 700.0)],
     # 自由農場A：北進場 600 → 西 350 → 東 700 → 西 700（3、4 可來回重複）
+    **ISLAND_ROUTES,
 }
-LABEL = {"village": "小村莊", "start": "起始之地", "farm": "自由農場A"}
+LABEL = {"village": "小村莊", "start": "起始之地", "farm": "自由農場A", **ISLAND_LABEL}
 
 # ---- 排程：各地區的資源刷新時間（秒）----
 # 為什麼要這個：以前是「小村莊→起始之地→農場」固定一輪，不管有沒有刷新。
@@ -248,34 +274,60 @@ REFRESH = {
     "village": 100.0,   # 樹重生（實測約 100 秒）
     "start": 100.0,     # 起始之地與小村莊同一批樹
     "farm": 240.0,      # 作物刷新 4 分鐘（使用者 2026-10-26 確認）
+    # 島嶼：只是拿來填空檔，隨時可去（0）；真的要走「刷新」再填秒數
+    **{a: 0.0 for a in ISLANDS},
 }
 # 加新場地時：ROUTES 加路線、LABEL 加名稱、這裡加刷新秒數，排程器就會自動排進去。
+
+
+def _ready_at(area, last):
+    """這區下一次可以去的時刻。沒去過 → -inf（永遠最優先）。"""
+    return last.get(area, float("-inf")) + REFRESH[area]
+
+
+def _overdue(area, now, last):
+    """超過自己刷新週期的比例。沒去過 → inf；刷新 0（隨時可去）→ inf。"""
+    r = REFRESH[area]
+    if r <= 0:
+        return float("inf")
+    return (now - last.get(area, float("-inf"))) / r
+
+
+def pick_island(now, last):
+    """多餘時間才去的島嶼：回傳島名或 None。
+
+    只挑「路線已經填好」的島（空的＝還沒調好，傳送過去會發呆）。
+    預設照 ISLANDS 的順序＝優先序（冰雪魔像 > 鯊魚島 > 鴨子島 > 松露島）；
+    ISLAND_RANDOM=True 時在同批可去的島裡隨機挑一個。
+    """
+    cands = [a for a in ISLANDS if ROUTES.get(a) and _ready_at(a, last) <= now]
+    if not cands:
+        return None
+    return random.choice(cands) if ISLAND_RANDOM else cands[0]
 
 
 def next_stop(now, last):
     """排程器：回傳 (地區, 還要等幾秒)。等 0 表示現在就可以去。
 
-    規則：只去「已經刷新」的地區，並優先挑**超過自己週期最多**的那個。
-    用比例而不是絕對秒數，是因為某區如果一趟走得比它的刷新時間還久，
-    用絕對秒數會讓它永遠最「超時」→ 把其他區餓死；用比例則各區都會輪到。
-    全部都在刷新中 → 回傳最快好的那一個，以及要等多久（由呼叫端負責睡）。
+    兩層：
+    1. **主區**（小村莊／起始之地／農場）先顧，只挑已經刷新的，
+       並優先挑**超過自己週期比例最多**的那個（用比例而非絕對秒數，
+       否則一趟走得比刷新還久的地區會永遠最超時、把其他區餓死）。
+    2. 主區全都在刷新 → 這是**空檔**，拿去打島嶼（見 pick_island）。
+    3. 連島都不能去 → 回傳最快好的主區 + 要等多久。
 
     last[area] = 上一次「開始採集」的時刻；沒去過視為 -inf（永遠最優先）。
     """
-    cand = []
-    for i, a in enumerate(REFRESH):
-        r = REFRESH[a]
-        cand.append((last.get(a, float("-inf")) + r, i, a, r))
-    ready = [c for c in cand if c[0] <= now]
+    main = [a for a in REFRESH if a not in ISLANDS]
+    ready = [a for a in main if _ready_at(a, last) <= now]
     if ready:
-        def overdue(c):
-            _, _, _, r = c
-            return float("inf") if r <= 0 else (now - (c[0] - r)) / r
-
-        # 同分時取順序前面那個（-i 越大＝i 越小），讓第一趟固定是 village → start → farm
-        return max(ready, key=lambda c: (overdue(c), -c[1]))[2], 0.0
-    t, _, a, _ = min(cand)
-    return a, t - now
+        # 同分時取宣告順序前面那個 → 第一趟固定是 village → start → farm
+        return max(ready, key=lambda a: (_overdue(a, now, last), -main.index(a))), 0.0
+    island = pick_island(now, last)
+    if island:
+        return island, 0.0
+    soonest = min(main, key=lambda a: _ready_at(a, last))
+    return soonest, _ready_at(soonest, last) - now
 
 
 # 起始之地後段與小村莊共用 → 停頓點直接沿用。
@@ -465,7 +517,7 @@ def pearl(rec, img, force=False):
 
 
 def main():
-    global MEASURE, VERBOSE, SPEED_SCALE
+    global MEASURE, VERBOSE, SPEED_SCALE, ISLAND_RANDOM
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=None,
                     help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
@@ -475,6 +527,8 @@ def main():
                     help="每輪之間額外等幾秒（預設 0：靠林內慢走控制週期）")
     ap.add_argument("--verbose", action="store_true",
                     help="console 也印每一段（預設只印輪次、傳送、休息與錯誤）")
+    ap.add_argument("--island-random", action="store_true",
+                    help="空檔打島嶼時，在同批可去的島裡隨機挑（預設照優先序 冰雪魔像>鯊魚>鴨子>松露）")
     ap.add_argument("--no-pearl", action="store_true",
                     help="不拿珍珠（預設每超過 10 分鐘冷卻就去拿一次）")
     ap.add_argument("--pearl-only", action="store_true",
@@ -487,6 +541,7 @@ def main():
     args = ap.parse_args()
     MEASURE = args.measure
     VERBOSE = args.verbose
+    ISLAND_RANDOM = args.island_random
     if args.speed_scale is not None:
         if args.speed_scale <= 0:
             ap.error("--speed-scale 必須大於 0")
@@ -496,8 +551,11 @@ def main():
         print(f"速度倍率 {SPEED_SCALE:g}（速度表 2026-10-26 重標；1.0 = 表值即實際值）")
         print(f"進場北走：拖 {ENTRY_DRAG}px；西走：拖 {ENTRY_WEST_DRAG}px；"
               f"林內：拖 {FOREST_DRAG}px → {speed_of(FOREST_DRAG):.1f}px/秒")
-        for area in ("village", "start", "farm"):
+        for area in ROUTES:
             print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")
+            if not ROUTES[area]:
+                print("  （路線還沒填 → 排程器會跳過這個島，不會傳送過去發呆）")
+                continue
             for i, act in enumerate(ROUTES[area], 1):
                 if act[0] == "REST":
                     print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）")
@@ -517,12 +575,18 @@ def main():
         if args.pearl_only:
             print("※ --pearl-only：只傳送到小村莊走珍珠，忽略冷卻，不走任何採集路段")
             return
-        print("\n排程（只去已刷新的地區；全部都在刷新就等最快好的那個）：")
+        print("\n排程（只去已刷新的地區；主區全在刷新 → 用空檔打島嶼）：")
         for a in REFRESH:
             r = REFRESH[a]
-            print(f"  {LABEL[a]:8s} 刷新 {r:5.0f}s" + ("（隨時可去）" if r <= 0 else ""))
+            mark = ""
+            if a in ISLANDS:
+                mark = "　← 空檔才去" + ("" if ROUTES.get(a) else "，路線待填（跳過）")
+            print(f"  {LABEL[a]:8s} 刷新 {r:5.0f}s"
+                  + ("（隨時可去）" if r <= 0 else "") + mark)
         print(f"  {'珍珠':8s} 冷卻 {PEARL_COOLDOWN:5.0f}s（附掛在小村莊，不會單獨跑一趟）")
-        print(f"　固定座標：愛心{HEART} 格子{TILE} 休息{REST_TAP}")
+        print(f"  島嶼優先序：{' > '.join(LABEL[a] for a in ISLANDS)}"
+              f"{'（隨機挑）' if ISLAND_RANDOM else '（照順序）'}")
+        print(f"　固定座標：愛心{HEART} 休息{REST_TAP}")
         return
 
     run = Path("captures") / time.strftime("fixed_%Y%m%d_%H%M%S")
@@ -581,9 +645,10 @@ def main():
             log.close()
         return
 
-    # --cycles N ＝ 走完 N 趟「每一區各採一次」的份量（＝ N × 地區數 站），
-    # 保留原本「--cycles 1 就是走完三區一輪」的語意。
-    step_limit = None if args.cycles is None else args.cycles * len(REFRESH)
+    # --cycles N ＝ 走完 N 趟「每個可用地區各採一次」的份量，保留原本語意。
+    # 「可用」＝主區 + 路線已填好的島；路線還空著的島不算，不然 --cycles 會多等好幾站。
+    usable = [a for a in REFRESH if a not in ISLANDS or ROUTES.get(a)]
+    step_limit = None if args.cycles is None else args.cycles * len(usable)
     last_visit = {}          # area → 上一次開始採集的時刻
     steps = 0
 
