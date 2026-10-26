@@ -155,7 +155,7 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.route_settle('village', 18), 0.0)
 
     def test_listed_leg_pauses(self):
-        for n in (3, 5, 7, 12, 14, 15):
+        for n in (3, 5, 7, 12, 14, 15, 17):
             self.assertEqual(cf.route_settle('village', n), 0.5)
 
     def test_start_shares_village_tail_pauses(self):
