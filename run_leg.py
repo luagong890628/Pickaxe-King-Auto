@@ -124,7 +124,7 @@ def main():
         save_dir.mkdir(parents=True, exist_ok=True)
 
     if args.walk:
-        acts, teleport = parse_walk(args.walk), False
+        acts, teleport = [(i, a) for i, a in enumerate(parse_walk(args.walk), 1)], False
     else:
         route = cf.ROUTES[args.area]
         acts = []
@@ -132,7 +132,7 @@ def main():
             if not 1 <= n <= len(route):
                 print(f"第 {n} 段不存在（{cf.LABEL[args.area]} 共 {len(route)} 段）")
                 return 2
-            acts.append(route[n - 1])
+            acts.append((n, route[n - 1]))
         teleport = not args.no_teleport
 
     if teleport:
@@ -165,23 +165,24 @@ def main():
                 print(f"    速度倍率推估：實走/目標 = {actual / px:.3f}"
                       f" → 建議 --speed-scale {cf.SPEED_SCALE * actual / px:.2f}", flush=True)
 
-    for n, act in enumerate(acts, 1):
+    for i, (leg_no, act) in enumerate(acts, 1):
         if act[0] == "REST":
             img = cf.rest(rec_plain, img, cf.LABEL[args.area])
-            time.sleep(settle_for(n))
+            time.sleep(settle_for(i))
             continue
         d, px, _ = cf.route_act(act)
         # 路線段照主循環的分段速度；--drag 覆寫或 --walk 臨時段才用通用 DRAG_LEN
-        drag_len = cf.route_drag(args.area, n) if not args.walk and args.drag is None else None
+        # 注意要用**路線上的段號 leg_no**，不是本次走訪的第幾個（--no-teleport 續走時兩者不同）
+        drag_len = cf.route_drag(args.area, leg_no) if not args.walk and args.drag is None else None
         cur_drag[0] = cf.DRAG_LEN if drag_len is None else drag_len
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
-            cv2.imwrite(str(save_dir / f"leg{n:02d}_before.jpg"), small)
-        img = cf.leg(img, d, px, rec_leg, f"{cf.LABEL[args.area]}[{n}]",
-                     drag_len=drag_len, settle=settle_for(n))
+            cv2.imwrite(str(save_dir / f"leg{leg_no:02d}_before.jpg"), small)
+        img = cf.leg(img, d, px, rec_leg, f"{cf.LABEL[args.area]}[{leg_no}]",
+                     drag_len=drag_len, settle=settle_for(i))
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
-            cv2.imwrite(str(save_dir / f"leg{n:02d}_after.jpg"), small)
+            cv2.imwrite(str(save_dir / f"leg{leg_no:02d}_after.jpg"), small)
     if save_dir is not None:
         print(f"畫面存到 {save_dir}")
     if args.timing and presses:
