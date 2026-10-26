@@ -80,8 +80,8 @@ class SpeedProfileTest(unittest.TestCase):
         with patch('sys.argv', ['cycle_fixed.py', '--dry-run']), contextlib.redirect_stdout(out):
             cf.main()
         text = out.getvalue()
-        self.assertIn('拖 1200px', text)
-        self.assertIn('拖 85px', text)
+        self.assertIn(f'拖 {cf.ENTRY_DRAG}px', text)
+        self.assertIn(f'拖 {cf.FOREST_DRAG}px', text)
         sections = text.split('\n[')[1:]
         self.assertEqual(len(sections), 3)
         for area, section in zip(('village', 'start', 'farm'), sections):

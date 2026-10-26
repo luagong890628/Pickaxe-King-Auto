@@ -26,12 +26,19 @@ MENU_SCROLL_MS = 300
 TILE = {"farm": (350, 800), "village": (350, 1810), "start": (720, 1810)}
 REST_TAP = (721, 1839)                                  # 帳篷休息對話框中心
 
+# 傳送石冷卻（使用者 2026-10-26 確認 12 秒）：冷卻中再點不會傳送，選單會留在畫面上，
+# 之後的手勢就打在選單上而不是搖桿。實測連續傳送間隔 6 秒時，後續滑動位移量到 0px。
+# 目前每區走 24 秒以上，正常不會撞到；這個保護是為了日後再調快或縮短補時時不會靜默失敗。
+TELEPORT_COOLDOWN = 12.0
+_last_teleport = 0.0
+
 # ---- 固定路線 ----
 DRAG = (720, 2600)
-DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（250≈343px/秒）
-ENTRY_DRAG = 1200      # 實驗：1200 未標定，暫沿用速度表 500 的上限換算
-ENTRY_WEST_DRAG = 250  # 進場第二個移動段往西時放慢，路線距離仍是 250px
-FOREST_DRAG = 85       # 實驗：林內速度；不加等待補足週期
+DRAG_LEN = 250         # 拖曳長度＝「搖桿推多遠」＝速度旋鈕（250≈466px/秒）
+# 林外（進場段）用最快：拖 1800 已達 903px/秒，再拉到 2200 平台只多 1.8%（2026-10-26 實測）
+ENTRY_DRAG = 1800
+ENTRY_WEST_DRAG = 250  # 進場第二個移動段往西時放慢（150px 短腿求精度，不用滿舵）
+FOREST_DRAG = 85       # 林內慢速（155px/秒）；林內要換速度再另外量
 FARM_DRAG = 300        # 自由農場A 林內拖曳（第2步起；進場第1步仍用 ENTRY_DRAG）
 ENTRY_LEGS = {"village": (1, 2), "start": (1,), "farm": (1,)}
 # 為什麼不是 400（488px/秒）：2026-10-22 交替實測同一 400px 腿，
@@ -47,10 +54,12 @@ DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
 # ---- 補時：農場走到定位（1、2）與固定 3、4 段後，再多砍固定組數的來回 ----
-# 輪次基準＝小村莊第 2 步（第一刀）。2026-10-23 實測（無補時）：
-#   輪首 → 下一輪輪首 83.1 秒；每組 3→4（東 700、西 700，拖 300）約 3.61 秒。
-#   目標：下一輪小村莊第 2 步落在基準後 115～120 秒。
-#   實跑：10 組 119～120 秒（5 輪）、9 組 115～116 秒（3 輪）；8 組 ≈ 112 秒。
+# 輪次基準＝小村莊第 2 步（第一刀）。
+# 2026-10-23 實測（舊速度，無補時）：輪首 → 下一輪輪首 83.1 秒；每組 3→4 約 3.61 秒。
+# 2026-10-26 重標速度後（新表）：**8 組只有 84 秒**（實測），低於樹重生的 100 秒 → 會漏砍。
+#   每組 3→4（東 700、西 700，拖 300／552px/秒）現在只要 2.54 秒。
+#   要回到 115～120 秒約需 19 組（84 + 11 組 × 2.8 ≈ 115 秒）。
+#   使用者 2026-10-26 指示「補時先不動」→ 維持 8 組，先觀察實際漏砍情況再決定。
 # 純開環固定組數：不看時間、不判斷樹重生；要調週期就改 FILL_PAIRS。
 FILL_LEGS = {"farm": (3, 4)}   # 補時重複的段（3→4→3→4…）
 FILL_PAIRS = 8                 # 再多砍幾組；1 組 = 3、4 各一次
@@ -67,16 +76,35 @@ STARTUP_MS = 0
 
 # ---- 搖桿速度表：拖曳長度 → px/秒 ----
 # 遊戲機制（使用者 2026-10-21）：第一次按下的點就是搖桿原點，往外拉越遠走越快。
-# 實測（test_drag.py，按住 800ms、南北成對，每點誤差 ≤2px）：
-#   L=50→50px/s、100→129、150→203、200→280、250→343、300→405、350→453、400→488、450→517、500→541
+# **2026-10-26 重標**（遊戲內跑速變快，舊表整組失效；舊值見 git 歷史 f92d4ec）。
+# 量法：test_drag.py --hold 1200（固定按住、只改拖曳長度）＋ run_leg.py 交叉驗證，
+#       每次傳送回小村莊、往北量、往南回；分數 <0.9 或實走≈0（被地形擋）一律不採用。
+#   L=85→155px/s（4 筆 152~156）、150→278、250→466（4 筆 463~472）、300→552、
+#   400→650、500→721（4 筆 719~729）、700→791、1200→866（5 筆 856~874）、
+#   1800→903（3 筆 901~905）
+# 平台區（2026-10-26 補測，各 2 筆）：2000→917（919/916）、2100→910（920/900）、
+#   2200→920（924/915）、2400→915（910/920）→ 2000 以後都在 910~924，差異在誤差內，
+#   天花板 ≈919px/秒。**拖 1800 已達天花板的 98%**，再拉長只是讓手勢橫跨整個螢幕，
+#   所以林外取 ENTRY_DRAG=1800；表上 2200/2400 同值 919 是平台，不是量到更高。
+# 舊表在 L=500 就夾住（541），但實測拖 1200 仍有 866px/s → 搖桿沒有在 500 飽和，
+# 進場段（ENTRY_DRAG）一直是表外值，這次一併納入標定。
 # 注意：這是 input swipe（偏移量在按住期間從 0 爬到 L）的平均速度，不是滿舵瞬時速度。
 # 速度只跟拖曳長度有關、跟按住時間無關（L=250 在 800/1500/2803ms 都是 341~349px/s）。
-SPEED_TABLE = [(50, 50.0), (100, 129.0), (150, 203.0), (200, 280.0), (250, 343.0),
-               (300, 405.0), (350, 453.0), (400, 488.0), (450, 517.0), (500, 541.0)]
+# L<85 未標定（沒有任何路線用到），一律夾在 155px/s。
+SPEED_TABLE = [(85, 155.0), (150, 278.0), (250, 466.0), (300, 552.0),
+               (400, 650.0), (500, 721.0), (700, 791.0), (1200, 866.0),
+               (1800, 903.0), (2200, 919.0), (2400, 919.0)]
+
+# ---- 全域速度倍率（給「日後又調速度」用的備援旋鈕，目前 1.0）----
+# 上表已經是 2026-10-26 的實測值，正常情況不用動這裡。
+# 曲線形狀被改過，所以倍率不等於「整張表等比」：只能在確定形狀沒變時用。
+#   實際速度 = 表上速度 × SPEED_SCALE
+# 量法（run_leg.py 每段會直接印建議值）：走一段已知 px，實走 ÷ 目標 = k ÷ 目前倍率。
+SPEED_SCALE = 1.0
 
 
-def speed_of(drag_len: float) -> float:
-    """拖曳長度 → px/秒（線性內插，超出表格就夾住）。"""
+def _table_speed(drag_len: float) -> float:
+    """速度表上的值（未套全域倍率）。"""
     if drag_len <= SPEED_TABLE[0][0]:
         return SPEED_TABLE[0][1]
     for (l0, v0), (l1, v1) in zip(SPEED_TABLE, SPEED_TABLE[1:]):
@@ -84,6 +112,11 @@ def speed_of(drag_len: float) -> float:
             t = (drag_len - l0) / (l1 - l0)
             return v0 + t * (v1 - v0)
     return SPEED_TABLE[-1][1]
+
+
+def speed_of(drag_len: float) -> float:
+    """拖曳長度 → 目前實際 px/秒（表上速度 × SPEED_SCALE）。"""
+    return _table_speed(drag_len) * SPEED_SCALE
 
 
 # 按住下限。2026-10-21 實測（test_hold.py，固定起點 (720,2600)、拖曳 250px）：
@@ -199,8 +232,16 @@ def step(img, d, px=None, drag_len=None, settle=None):
 
 
 def teleport(area, rec):
-    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等0.5秒 → 點固定格子。"""
+    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等0.5秒 → 點固定格子（含 12 秒冷卻保護）。"""
+    global _last_teleport
+    if _last_teleport:
+        gap = time.time() - _last_teleport
+        if gap < TELEPORT_COOLDOWN:
+            wait = TELEPORT_COOLDOWN - gap
+            rec({"note": f"等傳送石冷卻 {wait:.1f}s"})
+            time.sleep(wait)
     adb.tap(*HEART)
+    _last_teleport = time.time()
     time.sleep(0.5)
     adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
     time.sleep(0.5)
@@ -250,7 +291,7 @@ def fill_cycle(area, rec, img, pairs=None):
 
 
 def main():
-    global MEASURE, VERBOSE
+    global MEASURE, VERBOSE, SPEED_SCALE
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=None,
                     help="執行分鐘數（預設無限循環，按 Ctrl+C 停止）")
@@ -261,12 +302,19 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--measure", action="store_true",
                     help="每段量實際位移（每段多花約 0.8 秒截圖；調 px 時用）")
+    ap.add_argument("--speed-scale", type=float, default=None,
+                    help="全域速度倍率（遊戲改跑速後用；見 SPEED_SCALE 註解）")
     args = ap.parse_args()
     MEASURE = args.measure
     VERBOSE = args.verbose
+    if args.speed_scale is not None:
+        if args.speed_scale <= 0:
+            ap.error("--speed-scale 必須大於 0")
+        SPEED_SCALE = args.speed_scale
 
     if args.dry_run:
-        print(f"\n進場北走：拖 {ENTRY_DRAG}px；西走：拖 {ENTRY_WEST_DRAG}px；"
+        print(f"速度倍率 {SPEED_SCALE:g}（速度表 2026-10-26 重標；1.0 = 表值即實際值）")
+        print(f"進場北走：拖 {ENTRY_DRAG}px；西走：拖 {ENTRY_WEST_DRAG}px；"
               f"林內：拖 {FOREST_DRAG}px → {speed_of(FOREST_DRAG):.1f}px/秒")
         for area in ("village", "start", "farm"):
             print(f"\n[{LABEL[area]}] 傳送落點 {TILE[area]}")

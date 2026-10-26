@@ -198,3 +198,9 @@
 {"dir": "N", "px": 400.0, "measured": [0, -413], "source": "template", "score": 0.95, "drag": 250, "area": "village", "t": "2026-10-22 23:48:53"}
 {"dir": "S", "px": 800.0, "measured": [0, 824], "source": "低信心", "score": 0.14, "drag": 250, "area": "village", "t": "2026-10-22 23:49:00"}
 {"dir": "N", "px": 800.0, "measured": [0, 0], "source": "低信心", "score": 0.17, "drag": 250, "area": "village", "t": "2026-10-22 23:49:07"}
+{"dir": "N", "px": 850.0, "measured": [0, -1345], "source": "template", "score": 0.97, "drag": 1200, "area": "village", "t": "2026-10-26 15:08:33"}
+{"dir": "L", "px": 400.0, "measured": [-516, 0], "source": "template", "score": 0.96, "drag": 250.0, "area": "village", "t": "2026-10-26 15:08:46"}
+{"dir": "R", "px": 400.0, "measured": [532, 0], "source": "template", "score": 0.97, "drag": 500.0, "area": "village", "t": "2026-10-26 15:09:01"}
+{"dir": "L", "px": 250.0, "measured": [-364, 0], "source": "template", "score": 1.0, "drag": 85.0, "area": "village", "t": "2026-10-26 15:09:15"}
+{"dir": "R", "px": 250.0, "measured": [371, 0], "source": "template", "score": 0.99, "drag": 85.0, "area": "village", "t": "2026-10-26 15:09:23"}
+{"dir": "N", "px": 850.0, "measured": [0, -856], "source": "template", "score": 0.97, "drag": 1800, "area": "village", "t": "2026-10-26 15:33:32"}

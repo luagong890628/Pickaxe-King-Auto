@@ -14,11 +14,20 @@
     要改哪一段就直接改 cycle_fixed.py 的 ROUTES，然後只走「起點到那一段」為止：
     例如改第 2 段 → 跑 `village 1 2`（因為第 2 段的起點是靠第 1 段走出來的）。
     除非使用者說「重跑」，不要開整輪。
+
+量速度倍率 k（遊戲改跑速後的第一步）
+    python run_leg.py village --walk N:300 --drag 250 --no-teleport --settle 1.5
+    python run_leg.py village --walk S:300 --drag 400 --no-teleport --settle 1.5
+    python run_leg.py village --walk N:300 --drag 1200 --no-teleport --settle 1.5
+    每段會印「建議 --speed-scale」。三次建議值一致＝搖桿曲線形狀沒變，只改倍率即可；
+    不一致（尤其 1200 那筆）＝曲線被改過或超出標定區間，要重標 SPEED_TABLE。
+    南北交替是為了消掉漂移；拖 1200 那筆專門驗進場段（ENTRY_DRAG）能不能套同一個倍率。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 
@@ -74,6 +83,8 @@ def main():
                     help="量測只信範本比對（預設是範本＋相位相關交叉驗證，較穩）")
     ap.add_argument("--drag", type=float, default=None,
                     help="覆寫拖曳長度＝搖桿速度（250≈343px/秒、400≈488、500≈541）")
+    ap.add_argument("--speed-scale", type=float, default=None,
+                    help="全域速度倍率（遊戲改跑速後用；量 k 時先留 1.0）")
     ap.add_argument("--force", action="store_true", help="即使前景不是遊戲也照跑")
     ap.add_argument("--timing", action="store_true", help="量每段按下的時間與段間間隔（秒）")
     ap.add_argument("--no-measure", action="store_true",
@@ -91,6 +102,8 @@ def main():
 
     cf.MEASURE = not args.no_measure      # 預設要量；--no-measure 用來看長跑節奏
     cf.MEASURE_TEMPLATE = args.template
+    if args.speed_scale is not None:
+        cf.SPEED_SCALE = args.speed_scale
     if args.drag:
         cf.DRAG_LEN = args.drag
 
@@ -146,6 +159,11 @@ def main():
             log_walk(rec)
             print(f"    紀錄：{d} {px:.0f}px → 實走 ({rec['measured'][0]:+d},"
                   f"{rec['measured'][1]:+d}) [{rec['source']} {rec['score']}]", flush=True)
+            # 實走/目標 = k / 目前倍率 → 建議倍率 = 目前倍率 × 比值
+            actual = math.hypot(rec["measured"][0], rec["measured"][1])
+            if px > 0:
+                print(f"    速度倍率推估：實走/目標 = {actual / px:.3f}"
+                      f" → 建議 --speed-scale {cf.SPEED_SCALE * actual / px:.2f}", flush=True)
 
     for n, act in enumerate(acts, 1):
         if act[0] == "REST":
