@@ -24,6 +24,22 @@ class RouteToolsTest(unittest.TestCase):
             self.assertEqual(run_leg.main(), 0)
             return [c.args[0] for c in wait.call_args_list if c.args and c.args[0]]
 
+    def test_run_leg_fill_walks_the_padding_pairs(self):
+        # 農場的補時來回不在 ROUTES 裡，--fill 才會走（等同正式程式的 fill_cycle）
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('sys.argv', ['run_leg.py', 'farm', '1', '2', '3', '4',
+                                                   '--no-teleport', '--no-measure', '--fill']))
+            stack.enter_context(patch.object(cf, 'MEASURE', False))
+            stack.enter_context(patch.object(cf.adb, 'current_app', return_value='pickaxeking'))
+            stack.enter_context(patch.object(cf.adb, 'swipe'))
+            stack.enter_context(patch.object(cf, 'shot', return_value=None))
+            stack.enter_context(patch.object(cf.time, 'sleep'))
+            fill = stack.enter_context(patch.object(cf, 'fill_cycle', return_value=None))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            self.assertEqual(run_leg.main(), 0)
+            fill.assert_called_once()
+            self.assertEqual(fill.call_args.args[0], 'farm')
+
     def test_run_leg_without_settle_follows_route_setting(self):
         # 沒給 --settle 時要照 SETTLE_LEGS：第 1、2 段不停，第 3 段停 0.5
         self.assertEqual(

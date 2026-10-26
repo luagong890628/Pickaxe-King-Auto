@@ -88,6 +88,8 @@ def main():
                     help="全域速度倍率（遊戲改跑速後用；量 k 時先留 1.0）")
     ap.add_argument("--force", action="store_true", help="即使前景不是遊戲也照跑")
     ap.add_argument("--timing", action="store_true", help="量每段按下的時間與段間間隔（秒）")
+    ap.add_argument("--fill", action="store_true",
+                    help="走完路線後照 FILL_LEGS 再走 FILL_PAIRS 組補時（等同正式程式的農場補時）")
     ap.add_argument("--no-measure", action="store_true",
                     help="不量位移（＝長跑時的真實節奏；段間間隔會回到 ~1 秒）")
     args = ap.parse_args()
@@ -193,6 +195,9 @@ def main():
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{leg_no:02d}_after.jpg"), small)
+    if args.fill and not args.walk and args.area in cf.FILL_LEGS:
+        print(f"補時：{cf.FILL_PAIRS} 組 第 {cf.FILL_LEGS[args.area]} 段來回", flush=True)
+        img = cf.fill_cycle(args.area, rec_plain, img)
     if save_dir is not None:
         print(f"畫面存到 {save_dir}")
     if args.timing and presses:
