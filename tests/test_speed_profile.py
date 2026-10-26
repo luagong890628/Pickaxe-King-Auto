@@ -45,9 +45,9 @@ class SpeedProfileTest(unittest.TestCase):
     def test_farm_route_distances_and_per_leg_drag(self):
         self.assertEqual(cf.ROUTES['farm'],
                          [('N', 600.0), ('L', 350.0), ('R', 700.0), ('L', 700.0)])
-        # 第 1 步維持進場速度；西 350、東 700、西 700 都拖 300
+        # 第 1 步維持進場速度；西 350、東 700、西 700 都用 FARM_DRAG（現與林內同值 160）
         self.assertEqual([cf.route_drag('farm', n) for n in (1, 2, 3, 4)],
-                         [cf.ENTRY_DRAG, 300, 300, 300])
+                         [cf.ENTRY_DRAG, cf.FARM_DRAG, cf.FARM_DRAG, cf.FARM_DRAG])
 
     def test_farm_fill_repeats_legs_3_4_by_fixed_pairs(self):
         calls = []
@@ -60,8 +60,8 @@ class SpeedProfileTest(unittest.TestCase):
 
         # 一組＝第 3 段（東 700）＋第 4 段（西 700），拖曳都 300、停頓照 route_settle
         self.assertEqual([(d, px, kw['drag_len'], kw['settle']) for d, px, kw in calls],
-                         [('R', 700.0, 300, cf.route_settle('farm', 3)),
-                          ('L', 700.0, 300, cf.route_settle('farm', 4))] * 2)
+                         [('R', 700.0, cf.FARM_DRAG, cf.route_settle('farm', 3)),
+                          ('L', 700.0, cf.FARM_DRAG, cf.route_settle('farm', 4))] * 2)
 
     def test_farm_fill_defaults_to_configured_pair_count(self):
         with patch.object(cf, 'leg') as leg:
