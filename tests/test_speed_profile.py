@@ -158,10 +158,22 @@ class PerLegSettleTest(unittest.TestCase):
         for n in (3, 5, 7, 12, 14, 15):
             self.assertEqual(cf.route_settle('village', n), 0.5)
 
-    def test_other_areas_do_not_pause_yet(self):
-        for area in ('start', 'farm'):
-            self.assertEqual([n for n in range(1, len(cf.ROUTES[area]) + 1)
-                              if cf.route_settle(area, n)], [])
+    def test_start_shares_village_tail_pauses(self):
+        # 起始之地第 4 段起＝小村莊第 4 段起 → 停頓點必須一致（第 3 段是合併西走，也沿用）
+        for n in range(3, len(cf.ROUTES['start']) + 1):
+            self.assertEqual(cf.route_settle('start', n), cf.route_settle('village', n))
+        # 前兩段是自己的（進場 + 休息），不停
+        self.assertEqual(cf.route_settle('start', 1), 0.0)
+        self.assertEqual(cf.route_settle('start', 2), 0.0)
+
+    def test_farm_does_not_pause_yet(self):
+        self.assertEqual([n for n in range(1, len(cf.ROUTES['farm']) + 1)
+                          if cf.route_settle('farm', n)], [])
+
+    def test_start_route_is_prefix_plus_village_tail(self):
+        self.assertEqual(cf.ROUTES['start'][:3],
+                         [('N', 425.0), ('REST',), ('L', 450.0)])
+        self.assertEqual(cf.ROUTES['start'][3:], cf.VILLAGE[3:])
 
     def test_leg_12_north_is_longer(self):
         self.assertEqual(cf.route_act(cf.ROUTES['village'][11]), ('N', 150.0, None))
