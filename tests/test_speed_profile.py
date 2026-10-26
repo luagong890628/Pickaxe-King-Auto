@@ -154,10 +154,10 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.route_settle('village', 1), 0.0)
         self.assertEqual(cf.route_settle('village', 18), 0.0)
 
-    def test_slowed_legs_use_drag_160(self):
-        # 2026-10-26：原本靠停頓補刀的段，改成降速（拖 160）取代停頓
+    def test_slowed_legs_use_drag_120(self):
+        # 2026-10-26：原本靠停頓補刀的段，改成降速（拖 120）取代停頓
         for n in (3, 5, 7, 12, 14, 15, 17):
-            self.assertEqual(cf.route_drag('village', n), 160)
+            self.assertEqual(cf.route_drag('village', n), 120)
             self.assertEqual(cf.route_settle('village', n), 0.0)
         # 其餘林內段維持 200
         for n in (4, 6, 8, 9, 10, 11, 13, 16, 18):
@@ -181,9 +181,9 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.ROUTES['start'][4:], cf.VILLAGE[3:])
 
     def test_start_after_rest_is_fast_then_slow(self):
-        # 休息完先走一段快的（拖 ENTRY_WEST_DRAG）、再走一段慢的（拖 160，與小村莊第 3 段同步）
+        # 休息完先走一段快的（拖 ENTRY_WEST_DRAG）、再走一段慢的（拖 120，與小村莊第 3 段同步）
         self.assertEqual(cf.route_drag('start', 3), cf.ENTRY_WEST_DRAG)
-        self.assertEqual(cf.route_drag('start', 4), 160)
+        self.assertEqual(cf.route_drag('start', 4), 120)
         self.assertEqual(cf.route_drag('start', 4), cf.route_drag('village', 3))
         self.assertGreater(cf.speed_of(cf.ENTRY_WEST_DRAG), cf.speed_of(cf.FOREST_DRAG))
         # 兩段合計仍是原本的西 450，終點不變
