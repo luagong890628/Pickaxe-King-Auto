@@ -79,9 +79,18 @@ STEP_PX = 300.0        # step() 沒指定 px 時的預設距離（路線都用 R
 #   1. 終點完全不變（不像加 px 會位移、也不像降速會拖長每段移動）。
 #   2. 停下來的時間不是純浪費：輪次本來就必須 >100 秒（樹重生時間），
 #      停頓＝原地砍樹，比「補時來回」那種純移動更能把秒數用在刀口上。
-# 代價：每段 +SETTLE 秒。三區移動段共 55 段 → 2 秒就是 +110 秒/輪，
-#       所以下面的 FILL_PAIRS 要跟著重算，不能照舊（見補時那一段的說明）。
-SETTLE = 2.0           # 每段走完原地停多久（秒）；0＝不停（舊行為）
+# 代價：每段 +秒數。實測小村莊全部 18 段都停 2 秒要多 37.8 秒（17.9s → 55.7s），
+#       所以**不要全部停**：使用者逐段看過後只指定需要的段（見 SETTLE_LEGS）。
+SETTLE = 0.0           # 沒被 SETTLE_LEGS 指到的段，預設不停（0＝舊行為）
+# 哪幾段走完要停多久（秒）。2026-10-26 使用者看完不停頓那一趟後指定的：
+#   3 走完→4 之前、5 走完→6 之前、7 走完→8 之前、12 走完（北要走多一點+停頓）、15 走完→16 之前
+# 註：使用者原話是「11 北要走多一點」，但第 11 段是東 200、第 12 段才是北 125
+#     → 依方向判定為第 12 段。若其實是第 11 段，把 12 改成 11 即可。
+SETTLE_LEGS = {
+    "village": {3: 2.0, 5: 2.0, 7: 2.0, 12: 2.0, 15: 2.0},
+    "start": {},   # 起始之地還沒逐段看過，先全不停
+    "farm": {},    # 自由農場A 同上
+}
 MEASURE = False        # 每段量位移（截圖 0.76s／段）；調 px 要數字時用 --measure
 VERBOSE = False        # False＝console 只印大項目（輪次、傳送、休息）；log.jsonl 一律記全部
 MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段，但走動中比相位相關可靠）
@@ -185,7 +194,7 @@ VILLAGE = [
     ("R", 350.0),      # 9 往東（使用者指定 350）
     ("S", 125.0),      # 10 往南（使用者指定 125）
     ("R", 200.0),      # 11 往東
-    ("N", 125.0),      # 12 往北（使用者指定 125）
+    ("N", 150.0),      # 12 往北（2026-10-26 由 125 改 150：使用者「要走多一點」）
     ("R", 350.0),      # 13 往東（使用者指定350）
     ("S", 125.0),      # 14 往南（使用者指定125）
     ("L", 250.0),      # 15 往西（使用者指定250）
@@ -247,6 +256,15 @@ def route_drag(area, leg_number):
     if leg_number in ENTRY_LEGS[area]:
         return ENTRY_WEST_DRAG if d == "L" else ENTRY_DRAG
     return FOREST_DRAG
+
+
+def route_settle(area, leg_number):
+    """這一段走完原地停多久（秒）。0＝不停。
+
+    停頓＝留在同一棵樹的攻擊範圍內把最後一兩刀補完，是修漏砍最划算的槓桿
+    （不動速度、不位移終點）。只有 SETTLE_LEGS 列出的段才停，其餘用 SETTLE。
+    """
+    return SETTLE_LEGS.get(area, {}).get(leg_number, SETTLE)
 
 # 按住時間校正（2026-10-22 多場實測，固定起點、同方向來回各 5 次）
 #   - 同一場內大致成比例；但**同一條腿跨場次差 3.5%**（800px：771 vs 835）＝每場速度不同，
@@ -349,7 +367,7 @@ def fill_cycle(area, rec, img, pairs=None):
         for n in legs:
             d, px, _ = route_act(ROUTES[area][n - 1])
             img = leg(img, d, px, rec, f"{LABEL[area]}補時{n}",
-                      drag_len=route_drag(area, n), settle=SETTLE)
+                      drag_len=route_drag(area, n), settle=route_settle(area, n))
     return img
 
 
@@ -388,7 +406,8 @@ def main():
                 d, px, override = route_act(act)
                 drag = route_drag(area, i)
                 tag = f"（單段覆寫 {override:g}）" if override is not None else ""
-                dwell = f"／停 {SETTLE:g}s" if SETTLE else ""
+                s_ = route_settle(area, i)
+                dwell = f"／停 {s_:g}s" if s_ else ""
                 print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag}px／按住 {hold_ms(px, drag)}ms{tag}{dwell}")
             if area in FILL_LEGS:
                 print(f"  補時：再多 {FILL_PAIRS} 組第 "
@@ -430,7 +449,7 @@ def main():
                         d, px, _ = route_act(act)
                         img = leg(img, d, px, rec, LABEL[area],
                                   drag_len=route_drag(area, i),
-                                  settle=SETTLE)
+                                  settle=route_settle(area, i))
                 if area in FILL_LEGS:
                     img = fill_cycle(area, rec, img)
 

@@ -40,7 +40,7 @@ class SpeedProfileTest(unittest.TestCase):
         for (d, px, kw), (area, i, act) in zip(calls, expected):
             self.assertEqual((d, px), cf.route_act(act)[:2])
             self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), cf.route_drag(area, i))
-            self.assertEqual(kw['settle'], cf.SETTLE)
+            self.assertEqual(kw['settle'], cf.route_settle(area, i))
 
     def test_farm_route_distances_and_per_leg_drag(self):
         self.assertEqual(cf.ROUTES['farm'],
@@ -58,9 +58,10 @@ class SpeedProfileTest(unittest.TestCase):
         with patch.object(cf, 'leg', side_effect=leg):
             cf.fill_cycle('farm', lambda o: None, None, pairs=2)
 
-        # 一組＝第 3 段（東 700）＋第 4 段（西 700），拖曳都 300、到點停頓同 SETTLE
+        # 一組＝第 3 段（東 700）＋第 4 段（西 700），拖曳都 300、停頓照 route_settle
         self.assertEqual([(d, px, kw['drag_len'], kw['settle']) for d, px, kw in calls],
-                         [('R', 700.0, 300, cf.SETTLE), ('L', 700.0, 300, cf.SETTLE)] * 2)
+                         [('R', 700.0, 300, cf.route_settle('farm', 3)),
+                          ('L', 700.0, 300, cf.route_settle('farm', 4))] * 2)
 
     def test_farm_fill_defaults_to_configured_pair_count(self):
         with patch.object(cf, 'leg') as leg:
@@ -139,6 +140,31 @@ class PerLegDragOverrideTest(unittest.TestCase):
                 d, px, _ = cf.route_act(act)
                 cf.leg(None, d, px, lambda o: None, 'v', drag_len=cf.route_drag('village', i))
         self.assertEqual(calls[2], ('L', 300.0, 150))
+
+
+class PerLegSettleTest(unittest.TestCase):
+    """到點停頓：只有 SETTLE_LEGS 指到的段才停，其餘用 SETTLE（預設 0）。"""
+
+    def test_only_listed_legs_pause(self):
+        pauses = [n for n in range(1, 19) if cf.route_settle('village', n)]
+        self.assertEqual(pauses, sorted(cf.SETTLE_LEGS['village']))
+
+    def test_unlisted_leg_uses_global_default(self):
+        self.assertEqual(cf.SETTLE, 0.0)
+        self.assertEqual(cf.route_settle('village', 1), 0.0)
+        self.assertEqual(cf.route_settle('village', 18), 0.0)
+
+    def test_listed_leg_pauses(self):
+        for n in (3, 5, 7, 12, 15):
+            self.assertEqual(cf.route_settle('village', n), 2.0)
+
+    def test_other_areas_do_not_pause_yet(self):
+        for area in ('start', 'farm'):
+            self.assertEqual([n for n in range(1, len(cf.ROUTES[area]) + 1)
+                              if cf.route_settle(area, n)], [])
+
+    def test_leg_12_north_is_longer(self):
+        self.assertEqual(cf.route_act(cf.ROUTES['village'][11]), ('N', 150.0, None))
 
 
 if __name__ == '__main__':
