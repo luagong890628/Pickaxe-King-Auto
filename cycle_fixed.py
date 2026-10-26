@@ -368,7 +368,7 @@ def step(img, d, px=None, drag_len=None, settle=None):
 
 
 def teleport(area, rec):
-    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等0.5秒 → 點固定格子（含 12 秒冷卻保護）。"""
+    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等0.3秒 → 點固定格子（含 12 秒冷卻保護）。"""
     global _last_teleport
     if _last_teleport:
         gap = time.time() - _last_teleport
@@ -378,16 +378,19 @@ def teleport(area, rec):
             time.sleep(wait)
     adb.tap(*HEART)
     _last_teleport = time.time()
-    time.sleep(0.5)
+    time.sleep(TELEPORT_WAIT)
     adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
-    time.sleep(0.5)
+    time.sleep(TELEPORT_WAIT)
     adb.tap(*TILE[area])
-    time.sleep(0.5)
+    time.sleep(TELEPORT_WAIT)
     rec({"note": f"傳送 {area}", "big": True,
          "show": f"[{LABEL[area]}] 傳送完成"})
 
 
 REST_WAIT = 2.0          # 點擊休息後等動畫（2026-10-23 由 3.2 改 2 秒，尚未實跑驗證）
+TELEPORT_WAIT = 0.3      # 傳送過程中每個手勢之後等畫面反應（2026-10-26 由 0.5 改 0.3）
+# 這三個 0.3 秒是「選單還沒收起來、下一步手勢就打在那個選單上」的保險。
+# 出事的話整趟都會歪掉，所以要再往下砍之前，先確認實機連走 20 站都沒失手。
 
 
 def rest(rec, img, label):
@@ -436,6 +439,8 @@ PEARL_DRAG = 720           # 珍珠去回程用最快（東/西向的拖曳硬�
 # 珍珠只是去拿東西、不需要邊走邊砍，所以不必跟林內一樣慢；
 # 1080px 用 720（794px/秒）只要 1.4 秒，用林內的 150（278px/秒）要 3.9 秒。
 PEARL_COOLDOWN = 600.0     # 冷卻 10 分鐘
+PEARL_WAIT = 0.3           # 點珍珠後等拿取動畫（2026-10-26 由 REST_WAIT 的 2.0 改成 0.3）
+# 和帳篷休息分開：休息要等角色躺完（2 秒），珍珠只是點一下就拿走，不用跟著等那麼久。
 PEARL_TOLERANCE = 20.0     # --pearl-only 回歸驗證：出發點與回程點允許差幾 px 算「回到原位」
 _pearl_at = 0.0            # 上次拿到珍珠的時刻（0＝還沒拿過，第一輪一定去）
 
@@ -452,7 +457,7 @@ def pearl(rec, img, force=False):
         return img
     img = leg(img, "L", PEARL_WEST, rec, "珍珠去程", drag_len=PEARL_DRAG, settle=0)
     adb.tap(*REST_TAP)
-    time.sleep(REST_WAIT)                    # 等拿取動畫
+    time.sleep(PEARL_WAIT)                   # 等拿取動畫
     img = leg(img, "R", PEARL_EAST, rec, "珍珠回程", drag_len=PEARL_DRAG, settle=0)
     _pearl_at = time.time()
     rec({"note": "拿珍珠", "big": True, "show": "拿珍珠（冷卻 10 分鐘）"})
@@ -506,7 +511,7 @@ def main():
             if area in FILL_LEGS:
                 print(f"  補時：再多 {FILL_PAIRS} 組第 "
                       f"{'、'.join(str(n) for n in FILL_LEGS[area])} 段來回（固定組數，不看時間）")
-        print(f"珍珠：往西 {PEARL_WEST:.0f} → 點 {REST_TAP} → 往東 {PEARL_EAST:.0f}"
+        print(f"珍珠：往西 {PEARL_WEST:.0f} → 點 {REST_TAP}（等 {PEARL_WAIT:g}s）→ 往東 {PEARL_EAST:.0f}"
               f"（拖 {PEARL_DRAG}px → {speed_of(PEARL_DRAG):.1f}px/秒，"
               f"冷卻 {PEARL_COOLDOWN/60:.0f} 分鐘；第一輪一定拿）")
         if args.pearl_only:

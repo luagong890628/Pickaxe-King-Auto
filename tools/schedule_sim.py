@@ -18,7 +18,7 @@ MINUTES = float(sys.argv[1]) if len(sys.argv) > 1 else 30.0
 
 def main():
     dur = {a: area_seconds(a) for a in cf.REFRESH}
-    pearl = (cf.PEARL_WEST + cf.PEARL_EAST) / cf.speed_of(cf.PEARL_DRAG) + cf.REST_WAIT
+    pearl = (cf.PEARL_WEST + cf.PEARL_EAST) / cf.speed_of(cf.PEARL_DRAG) + cf.PEARL_WAIT
     end = MINUTES * 60
     now, last = 0.0, {}
     counts = {a: 0 for a in cf.REFRESH}

@@ -34,7 +34,7 @@ def area_seconds(area):
 
 
 if __name__ == "__main__":
-    pearl = cf.PEARL_WEST / cf.speed_of(cf.PEARL_DRAG) + cf.PEARL_EAST / cf.speed_of(cf.PEARL_DRAG) + cf.REST_WAIT + 2 * OVERHEAD
+    pearl = cf.PEARL_WEST / cf.speed_of(cf.PEARL_DRAG) + cf.PEARL_EAST / cf.speed_of(cf.PEARL_DRAG) + cf.PEARL_WAIT + 2 * OVERHEAD
     total = 0.0
     for a in ("village", "start", "farm"):
         s = area_seconds(a)

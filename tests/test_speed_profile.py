@@ -244,6 +244,17 @@ class PearlTest(unittest.TestCase):
                          [('L', cf.PEARL_WEST), ('R', cf.PEARL_EAST)])
         tap.assert_called_once_with(*cf.REST_TAP)
 
+    def test_pearl_uses_its_own_short_wait(self):
+        # 珍珠只是點一下就拿走，不用像帳篷休息那樣等 2 秒
+        self.assertEqual(cf.PEARL_WAIT, 0.3)
+        self.assertLess(cf.PEARL_WAIT, cf.REST_WAIT)
+        sleeps = []
+        with (patch.object(cf, 'leg', side_effect=lambda img, *a, **k: img),
+              patch.object(cf.adb, 'tap'),
+              patch.object(cf.time, 'sleep', side_effect=sleeps.append)):
+            cf.pearl(lambda o: None, None, force=True)
+        self.assertEqual(sleeps, [cf.PEARL_WAIT])
+
     def test_cooldown_is_ten_minutes(self):
         self.assertEqual(cf.PEARL_COOLDOWN, 600.0)
 

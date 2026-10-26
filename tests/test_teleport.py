@@ -24,9 +24,13 @@ class TeleportTest(unittest.TestCase):
             with self.subTest(area=area):
                 cf._last_teleport = 0.0
                 events = _run(area, now=1000.0)
-                self.assertEqual(events, [('tap', cf.HEART), ('wait', 0.5),
-                    ('swipe', (720, 850, 720, 2250, 300)), ('wait', 0.5),
-                    ('tap', tile), ('wait', 0.5)])
+                self.assertEqual(events, [('tap', cf.HEART), ('wait', cf.TELEPORT_WAIT),
+                    ('swipe', (720, 850, 720, 2250, 300)), ('wait', cf.TELEPORT_WAIT),
+                    ('tap', tile), ('wait', cf.TELEPORT_WAIT)])
+
+    def test_gesture_wait_is_0_3_seconds(self):
+        # 2026-10-26 使用者指示 0.5 → 0.3（三個手勢都改）
+        self.assertEqual(cf.TELEPORT_WAIT, 0.3)
 
     def test_waits_for_cooldown_before_tapping(self):
         """冷卻 12 秒、上次傳送在 6 秒前 → 先等 6 秒才點愛心。"""
