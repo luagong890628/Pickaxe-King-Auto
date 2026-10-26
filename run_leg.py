@@ -75,7 +75,8 @@ def main():
     ap.add_argument("--walk", action="append", default=[],
                     help="臨時段『方向:px』（例 --walk L:100）；從現在位置走、不傳送，可重複")
     ap.add_argument("--no-teleport", action="store_true")
-    ap.add_argument("--settle", type=float, default=1.0, help="段與段之間停多久")
+    ap.add_argument("--settle", type=float, default=None,
+                    help="段與段之間停多久；不給＝照路線設定（cycle_fixed.SETTLE_LEGS／SETTLE）")
     ap.add_argument("--settle-first", type=float, default=None,
                     help="第 1 段走完後改停這麼久（預設同 --settle）；其餘段仍用 --settle")
     ap.add_argument("--save", action="store_true", help="另存每段前後的畫面到 captures/")
@@ -140,11 +141,20 @@ def main():
         cf.teleport(args.area, rec_plain)
         time.sleep(2.5)
 
-    def settle_for(n):
-        """第 1 段走完後用 --settle-first（若給），其餘段用 --settle。"""
-        if n == 1 and args.settle_first is not None:
+    def settle_for(i, leg_no):
+        """這次走訪的第 i 段（路線段號 leg_no）走完後停多久。
+
+        優先序：--settle-first（只作用在本次第一段）> --settle（全部套用）
+                > 路線設定 route_settle（--walk 臨時段用全域 SETTLE）。
+        ⚠️ 這裡以前是 `default=1.0` 且直接回傳 args.settle，導致**每一段都停 1 秒**、
+           而且完全忽略 SETTLE_LEGS（使用者 2026-10-26 抓到：「為什麼感覺全部都有停」）。
+           要驗證停頓設定時千萬不要順手加 --settle，否則量到的不是程式真正的行為。
+        """
+        if i == 1 and args.settle_first is not None:
             return args.settle_first
-        return args.settle
+        if args.settle is not None:
+            return args.settle
+        return cf.SETTLE if args.walk else cf.route_settle(args.area, leg_no)
 
     img = cf.shot() if cf.MEASURE else None
     cur_drag = [cf.DRAG_LEN]
@@ -168,7 +178,7 @@ def main():
     for i, (leg_no, act) in enumerate(acts, 1):
         if act[0] == "REST":
             img = cf.rest(rec_plain, img, cf.LABEL[args.area])
-            time.sleep(settle_for(i))
+            time.sleep(settle_for(i, leg_no))
             continue
         d, px, _ = cf.route_act(act)
         # 路線段照主循環的分段速度；--drag 覆寫或 --walk 臨時段才用通用 DRAG_LEN
@@ -179,7 +189,7 @@ def main():
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{leg_no:02d}_before.jpg"), small)
         img = cf.leg(img, d, px, rec_leg, f"{cf.LABEL[args.area]}[{leg_no}]",
-                     drag_len=drag_len, settle=settle_for(i))
+                     drag_len=drag_len, settle=settle_for(i, leg_no))
         if save_dir is not None and img is not None:
             small = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))
             cv2.imwrite(str(save_dir / f"leg{leg_no:02d}_after.jpg"), small)

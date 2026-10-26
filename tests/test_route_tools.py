@@ -10,6 +10,33 @@ import run_leg
 
 
 class RouteToolsTest(unittest.TestCase):
+    def _run_leg_sleeps(self, argv_tail):
+        """跑 run_leg，回傳所有非 0 的 sleep 秒數。"""
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('sys.argv', ['run_leg.py'] + argv_tail))
+            stack.enter_context(patch.object(cf, 'MEASURE', False))
+            stack.enter_context(patch.object(cf, 'MEASURE_TEMPLATE', False))
+            stack.enter_context(patch.object(cf.adb, 'current_app', return_value='pickaxeking'))
+            stack.enter_context(patch.object(cf.adb, 'swipe'))
+            stack.enter_context(patch.object(cf, 'shot', side_effect=AssertionError('不應截圖')))
+            wait = stack.enter_context(patch.object(cf.time, 'sleep'))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            self.assertEqual(run_leg.main(), 0)
+            return [c.args[0] for c in wait.call_args_list if c.args and c.args[0]]
+
+    def test_run_leg_without_settle_follows_route_setting(self):
+        # 沒給 --settle 時要照 SETTLE_LEGS：第 1、2 段不停，第 3 段停 0.5
+        self.assertEqual(
+            self._run_leg_sleeps(['village', '1', '2', '3', '--no-teleport', '--no-measure']),
+            [cf.route_settle('village', 3)])
+
+    def test_run_leg_explicit_settle_overrides_route(self):
+        # 給了 --settle 就每一段都停該值（量速度時想固定條件才用）
+        self.assertEqual(
+            self._run_leg_sleeps(['village', '1', '2', '3', '--no-teleport',
+                                  '--no-measure', '--settle', '1']),
+            [1.0, 1.0, 1.0])
+
     def test_run_leg_waits_only_requested_settle(self):
         for settle in ('0', '1', '5'):
             with self.subTest(settle=settle), contextlib.ExitStack() as stack:
