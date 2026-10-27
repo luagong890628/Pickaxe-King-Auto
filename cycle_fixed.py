@@ -141,14 +141,13 @@ FILL_PAIRS = 6                 # 再多砍幾組；1 組 = 3、4 各一次
 # 前 5 組是採收所需，第 6 組是保險；作物刷新 4 分鐘，
 # 不因村莊樹到期而縮短完整農場流程。
 
-# ---- 里程模型：距離 ≈ SPEED × (按住秒 − STARTUP) ----
+# ---- 里程模型：距離 → 按住時間（由 SPEED_TABLE 換算） ----
 # 同場兩次實測（2026-10-21，run_leg.py village 1 2 --template）：
 #   目標 970px / 按住 2809ms → 實走 978px（348px/秒）
 #   目標 250px / 按住  847ms → 實走 291px（344px/秒）
 # 兩點都落在「≈346px/秒、沒有起步延遲」；更早的「250px 只走 205px」與這兩點不符
 # （很可能是那條腿被擋或量測誤差），不採用。
 # 若日後短段又出現系統性偏短，先重測再動 STARTUP_MS，不要憑單一筆加補償。
-SPEED = 346.0
 STARTUP_MS = 0
 
 # ---- 搖桿速度表：拖曳長度 → px/秒 ----
@@ -250,7 +249,6 @@ ISLANDS = ("ice", "shark", "duck", "truffle")
 ISLAND_WEIGHTS = {"ice": 30, "shark": 25, "duck": 25, "truffle": 20}
 ISLAND_ENTRY_LEGS = 2
 ISLAND_MIN_DWELL = 12.0
-ISLAND_SWITCH_REMAINING = 25.0
 VILLAGE_FIRST_CUT_INTERVAL = 105.0
 
 ISLAND_LABEL = {"ice": "冰雪魔像島", "shark": "鯊魚島",
@@ -299,14 +297,11 @@ def _overdue(area, now, last):
     return (now - last.get(area, float("-inf"))) / r
 
 
-def eligible_islands(used):
-    """Return completed, non-empty islands not used in this filler window."""
-    return [a for a in ISLANDS if a not in used and ROUTES.get(a)]
-
-
-def choose_island(used):
-    """Weighted choice among route-validated islands not in ``used``."""
-    candidates = eligible_islands(used)
+def choose_island(excluded=None):
+    """Weighted choice among route-validated islands, excluding the last one."""
+    excluded = set() if excluded is None else set(excluded)
+    candidates = [a for a in ISLANDS
+                  if a not in excluded and ROUTES.get(a)]
     if not candidates:
         return None
     return random.choices(candidates,
@@ -329,11 +324,6 @@ def island_dwell_elapsed(start):
 
 def _teleport_cooldown_ready():
     return not _last_teleport or time.time() - _last_teleport >= TELEPORT_COOLDOWN
-
-
-def should_return_after_gesture(now, deadline, travel_reserve):
-    """Check only between gestures; an already-sent gesture is never split."""
-    return now + travel_reserve >= deadline
 
 
 def primary_cycle_limit(cycles):
@@ -584,36 +574,14 @@ def run_area(area, rec, no_pearl=False):
     return first_cut, img
 
 
-def _island_entry_reserve(area):
-    """Return the minimum time to enter, finish one gesture, and return."""
-    route = ROUTES[area]
-    entry = sum(
-        hold_ms(route_act(act)[1], route_act(act)[2] or 300)
-        for act in route[:ISLAND_ENTRY_LEGS]
-    ) / 1000
-    first_loop_leg = route_act(route[ISLAND_ENTRY_LEGS])
-    gesture = hold_ms(first_loop_leg[1], first_loop_leg[2] or 300) / 1000
-    now = time.time()
-    enter_cooldown = (
-        max(0.0, TELEPORT_COOLDOWN - (now - _last_teleport))
-        if _last_teleport else 0.0
-    )
-    teleport_wait = TELEPORT_WAIT * 3
-    elapsed_after_entry = teleport_wait + entry + gesture
-    return (enter_cooldown + elapsed_after_entry
-            + max(0.0, TELEPORT_COOLDOWN - elapsed_after_entry)
-            + teleport_wait)
-
-
-def run_island_filler(rec, deadline, used):
+def run_island_filler(rec, deadline):
     """Fill the gap with real-time island dwell and safe island switching.
 
     Island time is measured with ``perf_counter`` rather than route estimates.
-    A switch is allowed only after 12 seconds on the current island and while
-    more than 25 seconds remain.  Each island is capped at four full loops.
-    Once the deadline has arrived, safe gestures continue until teleport
-    cooldown is ready, then the completed gesture is followed by a return to
-    the village.
+    Each island is capped at four full loops. Once the tree deadline arrives,
+    safe gestures continue until the minimum dwell and teleport cooldown are
+    both satisfied, then the completed gesture is followed by a return to the
+    village.
     """
     did_work = False
     last_left = None
@@ -624,7 +592,6 @@ def run_island_filler(rec, deadline, used):
                 rec({"note": "島嶼無可切換候選，返回村莊", "decision": "return"})
                 teleport("village", rec)
             return did_work
-        used.add(area)
         did_work = True
         teleport(area, rec)
         rec({"note": f"[{LABEL[area]}] 開始補空檔", "big": True})
@@ -653,10 +620,10 @@ def run_island_filler(rec, deadline, used):
                     teleport("village", rec)
                     return did_work
                 continue
-            if dwell >= ISLAND_MIN_DWELL and remaining > ISLAND_SWITCH_REMAINING:
-                last_left = area
+            if dwell >= ISLAND_MIN_DWELL and loop_count >= 4:
                 rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
                      "island": area, "loop": loop_count, "decision": "switch"})
+                last_left = area
                 break
 
         else:
@@ -801,7 +768,6 @@ def main():
     last_visit = {}          # area → 上一次開始採集的時刻
     steps = 0
     last_first_cut = None
-    island_used = set()
 
     try:
         while time.time() < deadline and (step_limit is None or steps < step_limit):
@@ -812,7 +778,7 @@ def main():
                     filler_deadline = min(last_first_cut + VILLAGE_FIRST_CUT_INTERVAL,
                                           deadline)
                     if now < filler_deadline:
-                        did_work = run_island_filler(rec, filler_deadline, island_used)
+                        did_work = run_island_filler(rec, filler_deadline)
                         if did_work:
                             continue
                         remaining = min(filler_deadline, deadline) - time.time()
@@ -836,7 +802,6 @@ def main():
             first_cut, _ = run_area(area, rec, args.no_pearl)
             if first_cut is not None:
                 last_first_cut = first_cut
-                island_used.clear()
 
             if args.wait:
                 time.sleep(args.wait)

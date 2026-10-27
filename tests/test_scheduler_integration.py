@@ -56,7 +56,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, used, no_pearl=False):
+            def fill(rec, deadline, no_pearl=False):
                 clock.sleep(20.0)
                 return False
             return fill
@@ -74,7 +74,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, used, no_pearl=False):
+            def fill(rec, deadline, no_pearl=False):
                 clock.sleep(min(30.0, max(0.1, deadline - clock.now)))
                 return False
             return fill
@@ -90,7 +90,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, used, no_pearl=False):
+            def fill(rec, deadline, no_pearl=False):
                 return False
             return fill
 
@@ -125,8 +125,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
               patch.object(cf, 'teleport', side_effect=fake_teleport),
               patch.object(cf, 'leg', side_effect=fake_leg),
               patch.object(cf.random, 'choices', side_effect=lambda items, weights, k: [items[0]])):
-            used = set()
-            worked = cf.run_island_filler(lambda _: None, 100.0, used)
+            worked = cf.run_island_filler(lambda _: None, 100.0)
 
         self.assertTrue(worked)
         islands = [a for a in teleports if a in cf.ISLANDS]
