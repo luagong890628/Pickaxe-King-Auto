@@ -99,7 +99,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
         self.assertTrue(any(seconds > 0 for seconds in clock.sleeps))
         self.assertLess(len(clock.sleeps), 100)
 
-    def test_real_filler_path_uses_at_most_four_islands_without_repeats(self):
+    def test_real_filler_path_switches_without_immediate_repeats(self):
         clock = FakeClock()
         teleports = []
         legs = []
@@ -113,8 +113,15 @@ class SchedulerIntegrationTest(unittest.TestCase):
             clock.now += 1.0
             return img
 
+        perf_now = [0.0]
+        def fake_perf_counter():
+            value = perf_now[0]
+            perf_now[0] += 13.0
+            return value
+
         with (patch.object(cf.time, 'time', side_effect=clock.time),
               patch.object(cf.time, 'sleep', side_effect=clock.sleep),
+              patch.object(cf.time, 'perf_counter', side_effect=fake_perf_counter),
               patch.object(cf, 'teleport', side_effect=fake_teleport),
               patch.object(cf, 'leg', side_effect=fake_leg),
               patch.object(cf.random, 'choices', side_effect=lambda items, weights, k: [items[0]])):
@@ -122,10 +129,11 @@ class SchedulerIntegrationTest(unittest.TestCase):
             worked = cf.run_island_filler(lambda _: None, 100.0, used)
 
         self.assertTrue(worked)
-        self.assertEqual(len(teleports), 4)
-        self.assertEqual(len(set(teleports)), 4)
-        self.assertLessEqual(len(teleports), len(cf.ISLANDS))
-        self.assertLessEqual(len(legs), 4 * (2 + 4 * 4))
+        islands = [a for a in teleports if a in cf.ISLANDS]
+        self.assertGreaterEqual(len(islands), 2)
+        self.assertTrue(all(a != b for a, b in zip(islands, islands[1:])))
+        self.assertEqual(teleports[-1], "village")
+        self.assertGreaterEqual(len(legs), 2 * (2 + 4 * 4))
 
 
 if __name__ == '__main__':

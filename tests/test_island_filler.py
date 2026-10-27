@@ -1,5 +1,6 @@
 import contextlib
 import io
+import itertools
 import unittest
 from unittest.mock import patch
 
@@ -17,10 +18,37 @@ class IslandFillerContractTest(unittest.TestCase):
             self.assertEqual(cf.choose_island(set()), "shark")
         choices.assert_called_once_with(["ice", "shark", "duck", "truffle"], weights=[30, 25, 25, 20], k=1)
 
-    def test_island_route_entry_once_then_four_laps(self):
-        actions = list(cf.island_actions("shark"))
+    def test_island_route_entry_once_then_unbounded_laps(self):
+        actions = list(itertools.islice(cf.island_actions("shark"), 2 + 4 * 4))
         self.assertEqual(actions[:2], cf.ISLAND_ROUTES["shark"][:2])
         self.assertEqual(actions[2:], cf.ISLAND_ROUTES["shark"][2:] * 4)
+
+    def test_island_dwell_uses_real_elapsed_seconds(self):
+        self.assertEqual(cf.ISLAND_MIN_DWELL, 12.0)
+        with patch.object(cf.time, "time", return_value=100.0), \
+             patch.object(cf.time, "perf_counter", return_value=112.5):
+            self.assertEqual(cf.island_dwell_elapsed(100.0), 12.5)
+
+    def test_switch_island_excludes_only_island_just_left(self):
+        with patch.object(cf.random, "choices", return_value=["shark"]) as choices:
+            self.assertEqual(cf.choose_island({"ice"}), "shark")
+        choices.assert_called_once_with(
+            ["shark", "duck", "truffle"], weights=[25, 25, 20], k=1)
+
+    def test_farm_fill_pairs_is_not_shortened_by_deadline(self):
+        self.assertEqual(cf.FILL_PAIRS, 5)
+
+    def test_island_runtime_log_has_dwell_and_circle_fields(self):
+        rows = []
+        with patch.object(cf, "choose_island", return_value="ice"), \
+             patch.object(cf, "teleport"), \
+             patch.object(cf, "leg", return_value=None), \
+             patch.object(cf.time, "time", return_value=105.0), \
+             patch.object(cf.time, "perf_counter", return_value=20.0):
+            cf.run_island_filler(rows.append, 105.0, set())
+        runtime = [r for r in rows if "dwell_s" in r]
+        self.assertEqual(len(runtime), 1)
+        self.assertIn("circle", runtime[0])
 
     def test_return_boundary_does_not_split_physical_gesture(self):
         self.assertTrue(cf.should_return_after_gesture(104.0, 105.0, 2.0))
@@ -31,7 +59,7 @@ class IslandFillerContractTest(unittest.TestCase):
 
     def test_filler_runs_full_laps_without_adb_and_stops_at_boundary(self):
         calls = []
-        clock = iter([0.0] * 19 + [104.0])
+        now = [90.0]
 
         def fake_leg(img, d, px, rec, label, **kwargs):
             calls.append((d, px))
@@ -40,13 +68,22 @@ class IslandFillerContractTest(unittest.TestCase):
         with (patch.object(cf, "choose_island", return_value="ice"),
               patch.object(cf, "teleport"),
               patch.object(cf, "leg", side_effect=fake_leg),
-              patch.object(cf.time, "time", side_effect=lambda: next(clock))):
+              patch.object(cf.time, "time", side_effect=lambda: now[0]),
+              patch.object(cf.time, "perf_counter", return_value=90.0)):
             used = set()
-            cf.run_island_filler(lambda _: None, 105.0, used)
+            # The mocked gesture crosses the deadline on its first completion.
+            # This verifies the physical gesture is not split and the filler
+            # returns cleanly without a route-duration estimate.
+            def finish_after_gesture(*args, **kwargs):
+                calls.append((args[1], args[2]))
+                now[0] = 105.0
+                return args[0]
+            with patch.object(cf, "leg", side_effect=finish_after_gesture):
+                cf.run_island_filler(lambda _: None, 105.0, used)
 
         self.assertEqual(used, {"ice"})
-        self.assertEqual(len(calls), 2 + 4 * 4)
-        self.assertEqual(calls[:2], [cf.route_act(a)[:2] for a in cf.ISLAND_ROUTES["ice"][:2]])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0], cf.route_act(cf.ISLAND_ROUTES["ice"][0])[:2])
 
 
 if __name__ == "__main__":

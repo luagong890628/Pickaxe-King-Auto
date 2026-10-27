@@ -249,7 +249,8 @@ START_PREFIX = [
 ISLANDS = ("ice", "shark", "duck", "truffle")
 ISLAND_WEIGHTS = {"ice": 30, "shark": 25, "duck": 25, "truffle": 20}
 ISLAND_ENTRY_LEGS = 2
-ISLAND_MAX_LAPS = 4
+ISLAND_MIN_DWELL = 12.0
+ISLAND_SWITCH_REMAINING = 25.0
 VILLAGE_FIRST_CUT_INTERVAL = 105.0
 
 ISLAND_LABEL = {"ice": "冰雪魔像島", "shark": "鯊魚島",
@@ -304,7 +305,7 @@ def eligible_islands(used):
 
 
 def choose_island(used):
-    """Weighted choice among unused, route-validated islands."""
+    """Weighted choice among route-validated islands not in ``used``."""
     candidates = eligible_islands(used)
     if not candidates:
         return None
@@ -313,12 +314,21 @@ def choose_island(used):
 
 
 def island_actions(area):
-    """Yield one entry (two gestures), then at most four full laps."""
+    """Yield one entry, then keep yielding complete loop gestures forever."""
     route = ROUTES[area]
     yield from route[:ISLAND_ENTRY_LEGS]
     loop = route[ISLAND_ENTRY_LEGS:]
-    for _ in range(ISLAND_MAX_LAPS):
+    while True:
         yield from loop
+
+
+def island_dwell_elapsed(start):
+    """Return real elapsed island dwell; ``start`` comes from perf_counter."""
+    return time.perf_counter() - start
+
+
+def _teleport_cooldown_ready():
+    return not _last_teleport or time.time() - _last_teleport >= TELEPORT_COOLDOWN
 
 
 def should_return_after_gesture(now, deadline, travel_reserve):
@@ -596,30 +606,49 @@ def _island_entry_reserve(area):
 
 
 def run_island_filler(rec, deadline, used):
-    """Use each eligible island once until the village first-cut deadline.
+    """Fill the gap with real-time island dwell and safe island switching.
 
-    A return check is made only after a completed physical gesture.  The
-    teleport reserve is conservative: it covers the 12s teleport cooldown;
-    the next teleport itself enforces any remaining cooldown.
+    Island time is measured with ``perf_counter`` rather than route estimates.
+    A switch is allowed only after 12 seconds on the current island and while
+    more than 25 seconds remain.  Once the deadline has arrived, gestures
+    continue until teleport cooldown is ready, then the completed gesture is
+    followed by a return to the village.
     """
     did_work = False
+    last_left = None
     while True:
-        area = choose_island(used)
-        if area is None or time.time() + _island_entry_reserve(area) >= deadline:
+        area = choose_island({last_left} if last_left else set())
+        if area is None:
             return did_work
         used.add(area)
         did_work = True
         teleport(area, rec)
         rec({"note": f"[{LABEL[area]}] 開始補空檔", "big": True})
         img = shot() if MEASURE else None
+        island_started = time.perf_counter()
         for n, act in enumerate(island_actions(area), 1):
             d, px, override = route_act(act)
             img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
                       drag_len=override if override is not None else 300,
                       settle=0)
-            if should_return_after_gesture(
-                    time.time(), deadline, TELEPORT_COOLDOWN + TELEPORT_WAIT * 3):
-                return did_work
+            dwell = island_dwell_elapsed(island_started)
+            rec({"note": f"{LABEL[area]}島停留 {dwell:.1f}s，第{n}個手勢",
+                 "island": area, "dwell_s": round(dwell, 3),
+                 "gesture": n,
+                 "circle": 0 if n <= ISLAND_ENTRY_LEGS else
+                           (n - ISLAND_ENTRY_LEGS - 1) //
+                           (len(ROUTES[area]) - ISLAND_ENTRY_LEGS) + 1})
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                if _teleport_cooldown_ready():
+                    teleport("village", rec)
+                    return did_work
+                continue
+            if dwell >= ISLAND_MIN_DWELL and remaining > ISLAND_SWITCH_REMAINING:
+                last_left = area
+                used.clear()
+                used.add(area)
+                break
 
 
 def main():
