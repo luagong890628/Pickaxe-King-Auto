@@ -39,7 +39,11 @@ REST_TAP = (721, 1839)                                  # 帳篷休息對話框�
 # 之後的手勢就打在選單上而不是搖桿。實測連續傳送間隔 6 秒時，後續滑動位移量到 0px。
 # 目前每區走 24 秒以上，正常不會撞到；這個保護是為了日後再調快或縮短補時時不會靜默失敗。
 TELEPORT_COOLDOWN = 12.0
+# All island routes keep one second of slack: the game cooldown is 12s,
+# while a completed island loop can land close to that boundary.
+TELEPORT_COOLDOWN_MARGIN_BY_SOURCE = {"ice": 1.0, "shark": 1.0, "duck": 1.0, "truffle": 1.0}
 _last_teleport = 0.0
+_last_teleport_area = None
 
 # ---- 固定路線 ----
 DRAG = (720, 2600)
@@ -324,8 +328,21 @@ def island_dwell_elapsed(start):
     return time.perf_counter() - start
 
 
+def _teleport_cooldown_margin():
+    return TELEPORT_COOLDOWN_MARGIN_BY_SOURCE.get(_last_teleport_area, 0.0)
+
+
+def _teleport_cooldown_wait(now=None):
+    """Seconds until a tap is safe, including the source route's margin."""
+    if not _last_teleport:
+        return 0.0
+    now = time.time() if now is None else now
+    return max(0.0, TELEPORT_COOLDOWN + _teleport_cooldown_margin()
+               - (now - _last_teleport))
+
+
 def _teleport_cooldown_ready():
-    return not _last_teleport or time.time() - _last_teleport >= TELEPORT_COOLDOWN
+    return _teleport_cooldown_wait() <= 0.0
 
 
 def primary_cycle_limit(cycles):
@@ -455,20 +472,19 @@ def step(img, d, px=None, drag_len=None, settle=None):
 
 
 def teleport(area, rec):
-    """點愛心 → 手指向下拖1400px/300ms歸頂 → 等0.3秒 → 點固定格子（含 12 秒冷卻保護）。"""
-    global _last_teleport
-    if _last_teleport:
-        gap = time.time() - _last_teleport
-        if gap < TELEPORT_COOLDOWN:
-            wait = TELEPORT_COOLDOWN - gap
-            rec({"note": f"等傳送石冷卻 {wait:.1f}s"})
-            time.sleep(wait)
+    """固定傳送流程；不送 HEART tap 直到來源冷卻安全。"""
+    global _last_teleport, _last_teleport_area
+    wait = _teleport_cooldown_wait()
+    if wait:
+        rec({"note": f"等傳送石冷卻 {wait:.1f}s"})
+        time.sleep(wait)
     adb.tap(*HEART)
     time.sleep(TELEPORT_WAIT)
     adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
     time.sleep(TELEPORT_WAIT)
     adb.tap(*TILE[area])
     _last_teleport = time.time()
+    _last_teleport_area = area
     time.sleep(TELEPORT_WAIT)
     rec({"note": f"傳送 {area}", "big": True,
          "show": f"[{LABEL[area]}] 傳送完成"})

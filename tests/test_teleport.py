@@ -18,6 +18,11 @@ def _run(area, now):
 class TeleportTest(unittest.TestCase):
     def setUp(self):
         cf._last_teleport = 0.0            # 每個測試都從「沒傳送過」開始
+        cf._last_teleport_area = None
+
+    def tearDown(self):
+        cf._last_teleport = 0.0
+        cf._last_teleport_area = None
 
     def test_top_menu_gesture_wait_and_confirmed_destinations(self):
         for area, tile in [('farm', (350, 800)), ('village', (350, 1810)), ('start', (720, 1810))]:
@@ -38,6 +43,17 @@ class TeleportTest(unittest.TestCase):
         events = _run('village', now=1006.0)
         self.assertEqual(events[0], ('wait', 6.0))
         self.assertEqual(events[1], ('tap', cf.HEART))
+
+    def test_ice_source_keeps_margin_at_exact_game_cooldown_boundary(self):
+        cf._last_teleport = 1000.0
+        cf._last_teleport_area = 'ice'
+        events = _run('village', now=1000.0 + cf.TELEPORT_COOLDOWN)
+        self.assertEqual(events[0], ('wait', cf.TELEPORT_COOLDOWN_MARGIN_BY_SOURCE['ice']))
+        self.assertEqual(events[1], ('tap', cf.HEART))
+
+    def test_all_island_sources_keep_one_second_margin(self):
+        for area in cf.ISLANDS:
+            self.assertEqual(cf.TELEPORT_COOLDOWN_MARGIN_BY_SOURCE[area], 1.0)
 
     def test_no_wait_once_cooldown_elapsed(self):
         cf._last_teleport = 1000.0
@@ -63,7 +79,7 @@ class TeleportTest(unittest.TestCase):
             cf.teleport('ice', lambda _: None)
             self.assertAlmostEqual(cf._last_teleport, 1000.8)
             cf.teleport('village', lambda _: None)
-        self.assertAlmostEqual(events[6][1], 11.7)
+        self.assertAlmostEqual(events[6][1], 12.7)
         self.assertEqual(events[7], ('tap', cf.HEART))
 
     def test_records_tap_time_for_next_cooldown(self):

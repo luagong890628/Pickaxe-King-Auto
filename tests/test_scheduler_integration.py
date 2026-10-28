@@ -24,6 +24,14 @@ class FakeClock:
 
 
 class SchedulerIntegrationTest(unittest.TestCase):
+    def setUp(self):
+        cf._last_teleport = 0.0
+        cf._last_teleport_area = None
+
+    def tearDown(self):
+        cf._last_teleport = 0.0
+        cf._last_teleport_area = None
+
     def run_main(self, minutes, run_area, filler):
         clock = FakeClock()
         stations = []
