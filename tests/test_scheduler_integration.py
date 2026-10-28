@@ -99,6 +99,56 @@ class SchedulerIntegrationTest(unittest.TestCase):
         self.assertTrue(any(seconds > 0 for seconds in clock.sleeps))
         self.assertLess(len(clock.sleeps), 100)
 
+    def real_main_events(self, minutes):
+        clock = FakeClock()
+        clock.now = 100.0
+        events = []
+
+        def tap(x, y):
+            events.append(('tap', (x, y), clock.now))
+
+        def swipe(*args):
+            events.append(('swipe', args, clock.now))
+            clock.now += args[-1] / 1000
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                with (patch('sys.argv', ['cycle_fixed.py', '--minutes', str(minutes), '--no-pearl']),
+                      patch.object(cf, '_last_teleport', 0.0),
+                      patch.object(cf.time, 'time', side_effect=clock.time),
+                      patch.object(cf.time, 'perf_counter', side_effect=clock.time),
+                      patch.object(cf.time, 'sleep', side_effect=clock.sleep),
+                      patch.object(cf.adb, 'tap', side_effect=tap),
+                      patch.object(cf.adb, 'swipe', side_effect=swipe),
+                      patch.object(cf.adb, 'screencap', side_effect=AssertionError('no phone')),
+                      patch.object(cf.random, 'choices', side_effect=lambda items, weights, k: [items[0]]),
+                      contextlib.redirect_stdout(io.StringIO())):
+                    cf.main()
+            finally:
+                os.chdir(cwd)
+        return clock, events
+
+    def test_real_main_minutes_expiry_on_island_stops_without_village_transfer(self):
+        clock, events = self.real_main_events(1.5)
+        transfers = [(point, at) for kind, point, at in events if kind == 'tap' and point in cf.TILE.values()]
+        self.assertGreaterEqual(clock.now, 190.0)
+        self.assertLess(clock.now, 210.0)
+        self.assertEqual(sum(point == cf.TILE['village'] for point, _ in transfers), 1)
+        self.assertIn(transfers[-1][0], [cf.TILE[a] for a in cf.ISLANDS])
+        movement = [args for kind, args, _ in events if kind == 'swipe' and args[:2] == cf.DRAG]
+        self.assertEqual(movement[-1][2:4], (420, 2600))  # ice loop's last west gesture
+
+    def test_real_main_filler_and_run_area_have_one_village_transfer(self):
+        clock, events = self.real_main_events(2.3)
+        transfers = [point for kind, point, _ in events if kind == 'tap' and point in cf.TILE.values()]
+        village = cf.TILE['village']
+        self.assertIn(cf.TILE['ice'], transfers)
+        self.assertEqual(transfers.count(village), 2)  # initial village + exactly one return
+        self.assertFalse(any(a == b == village for a, b in zip(transfers, transfers[1:])))
+        self.assertFalse(any(s > 1 for s in clock.sleeps if s != cf.REST_WAIT))
+
     def test_real_filler_path_switches_without_immediate_repeats(self):
         clock = FakeClock()
         teleports = []
@@ -131,8 +181,8 @@ class SchedulerIntegrationTest(unittest.TestCase):
         islands = [a for a in teleports if a in cf.ISLANDS]
         self.assertGreaterEqual(len(islands), 2)
         self.assertTrue(all(a != b for a, b in zip(islands, islands[1:])))
-        self.assertEqual(teleports[-1], "village")
-        self.assertGreaterEqual(len(legs), 2 * (2 + 4 * 4))
+        self.assertNotIn('village', teleports)
+        self.assertGreaterEqual(len(legs), 2 * 6)
 
 
 if __name__ == '__main__':

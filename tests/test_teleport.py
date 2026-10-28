@@ -44,6 +44,28 @@ class TeleportTest(unittest.TestCase):
         events = _run('village', now=1020.0)
         self.assertEqual(events[0], ('tap', cf.HEART))
 
+    def test_cooldown_starts_at_destination_not_heart(self):
+        events = []
+        now = [1000.0]
+
+        def sleep(seconds):
+            events.append(('wait', seconds))
+            now[0] += seconds
+
+        def tap(*point):
+            events.append(('tap', point))
+            now[0] += 0.1
+
+        with (patch.object(cf.time, 'time', side_effect=lambda: now[0]),
+              patch.object(cf.time, 'sleep', side_effect=sleep),
+              patch.object(cf.adb, 'tap', side_effect=tap),
+              patch.object(cf.adb, 'swipe', side_effect=lambda *a: events.append(('swipe', a)))):
+            cf.teleport('ice', lambda _: None)
+            self.assertAlmostEqual(cf._last_teleport, 1000.8)
+            cf.teleport('village', lambda _: None)
+        self.assertAlmostEqual(events[6][1], 11.7)
+        self.assertEqual(events[7], ('tap', cf.HEART))
+
     def test_records_tap_time_for_next_cooldown(self):
         cf._last_teleport = 0.0
         _run('village', now=1234.5)

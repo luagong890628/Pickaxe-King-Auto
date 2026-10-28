@@ -1,5 +1,3 @@
-import contextlib
-import io
 import itertools
 import unittest
 from unittest.mock import patch
@@ -47,70 +45,62 @@ class IslandFillerContractTest(unittest.TestCase):
             cf.fill_cycle("farm", lambda _: None, None)
         self.assertEqual(calls, [("R", 700.0), ("L", 700.0)] * 6)
 
-    def test_island_loop_count_switches_after_four_complete_loops(self):
-        calls = []
-        now = [0.0]
-        with patch.object(cf, "choose_island", side_effect=["ice", "shark", None]), \
-             patch.object(cf, "teleport"), \
-             patch.object(cf, "leg", side_effect=lambda img, d, px, rec, label, **kw:
-                          calls.append(label) or img), \
-             patch.object(cf.time, "time", side_effect=lambda: now[0]), \
-             patch.object(cf.time, "perf_counter", side_effect=lambda: now[0]):
-            cf.run_island_filler(lambda _: None, 999.0)
-        self.assertEqual(calls[:2 + 4 * 4],
-                         ["冰雪魔像島補空檔"] * (2 + 4 * 4))
-        self.assertIn("鯊魚島補空檔", calls)
+    def exercise_filler(self, seconds, deadline, choices, cooldown=lambda: True):
+        now = [100.0]
+        moves, transfers, rows = [], [], []
 
-    def test_minimum_dwell_is_kept_when_tree_deadline_arrives(self):
-        now = [0.0]
-        with patch.object(cf, "choose_island", side_effect=["ice", None]), \
-             patch.object(cf, "teleport"), \
-             patch.object(cf, "leg", side_effect=lambda img, *args, **kw: img), \
-             patch.object(cf.time, "time", side_effect=lambda: now[0]), \
-             patch.object(cf.time, "perf_counter", side_effect=lambda: now[0]), \
-             patch.object(cf, "_teleport_cooldown_ready", return_value=True):
-            def dwell_gesture(*args, **kwargs):
-                now[0] += 3.0
-                return args[0]
-            with patch.object(cf, "leg", side_effect=dwell_gesture):
-                cf.run_island_filler(lambda _: None, 1.0)
-        self.assertGreaterEqual(now[0], cf.ISLAND_MIN_DWELL)
+        def move(img, d, px, rec, label, **kw):
+            moves.append((label, d, px))
+            now[0] += seconds
+            return img
 
-    def test_tree_ready_while_cooldown_not_ready_uses_safe_gesture_then_returns(self):
-        events = []
-        now = [0.0]
-        with patch.object(cf, "choose_island", side_effect=["ice", None]), \
-             patch.object(cf, "teleport", side_effect=lambda area, rec: events.append(area)), \
-             patch.object(cf, "leg", side_effect=lambda img, *args, **kw: events.append("gesture") or img), \
-             patch.object(cf.time, "time", side_effect=lambda: 0.0), \
-             patch.object(cf.time, "perf_counter", side_effect=[0.0] + [12.0] * 32), \
-             patch.object(cf, "_teleport_cooldown_ready", side_effect=[False, True]):
-            cf.run_island_filler(lambda _: None, 0.0)
-        self.assertNotIn("village", events[:-1])
-        self.assertEqual(events[-1], "village")
+        with (patch.object(cf, 'choose_island', side_effect=choices) as choose,
+              patch.object(cf, 'teleport', side_effect=lambda area, rec: transfers.append((area, now[0]))),
+              patch.object(cf, 'leg', side_effect=move),
+              patch.object(cf, '_teleport_cooldown_ready', side_effect=lambda: cooldown()),
+              patch.object(cf.time, 'time', side_effect=lambda: now[0]),
+              patch.object(cf.time, 'perf_counter', side_effect=lambda: now[0])):
+            worked = cf.run_island_filler(rows.append, deadline)
+        return moves, transfers, rows, choose, worked
 
-    def test_switches_after_minimum_dwell_when_tree_is_not_ready(self):
-        teleports = []
-        with patch.object(cf, "choose_island", side_effect=["ice", "shark", None]), \
-             patch.object(cf, "teleport", side_effect=lambda area, rec: teleports.append(area)), \
-             patch.object(cf, "leg", return_value=None), \
-             patch.object(cf.time, "time", return_value=0.0), \
-             patch.object(cf.time, "perf_counter", return_value=12.0):
-            cf.run_island_filler(lambda _: None, 100.0)
-        self.assertEqual(teleports, ["ice", "shark", "village"])
+    def test_few_seconds_left_switches_at_minimum_and_new_island_keeps_minimum(self):
+        moves, transfers, rows, choose, worked = self.exercise_filler(
+            3.0, 121.0, ['ice', 'shark'])
+        self.assertTrue(worked)
+        self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 118.0)])
+        self.assertEqual([r['gesture'] for r in rows if r.get('decision') == 'switch'], [6])
+        self.assertGreaterEqual(len([m for m in moves if m[0] == '鯊魚島補空檔']), 6)
+        self.assertEqual(choose.call_args_list[1].args, ({'ice'},))
 
-    def test_island_runtime_log_has_dwell_and_circle_fields(self):
-        rows = []
-        with patch.object(cf, "choose_island", side_effect=["ice", None]), \
-             patch.object(cf, "teleport"), \
-             patch.object(cf, "leg", return_value=None), \
-             patch.object(cf.time, "time", return_value=105.0), \
-             patch.object(cf.time, "perf_counter", return_value=32.0), \
-             patch.object(cf, "_teleport_cooldown_ready", return_value=True):
-            cf.run_island_filler(rows.append, 105.0)
-        runtime = [r for r in rows if "dwell_s" in r]
-        self.assertGreaterEqual(len(runtime), 1)
-        self.assertIn("circle", runtime[0])
+    def test_cooldown_unready_continues_complete_loops_without_menu_or_sleep(self):
+        checks = iter([False, False, True])
+        with patch.object(cf.time, 'sleep', side_effect=AssertionError('stationary wait')):
+            moves, transfers, rows, _, _ = self.exercise_filler(
+                0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
+        self.assertEqual([a for a, _ in transfers], ['ice'])
+        self.assertEqual(len(moves), 34)  # entry 2 + eight full loops
+        self.assertEqual(rows[-1]['decision'], 'return')
+
+    def test_switch_waits_for_cooldown_by_walking_more_loops(self):
+        checks = iter([False, False, True, True])
+        moves, transfers, _, _, _ = self.exercise_filler(
+            3.0, 145.0, ['ice', 'shark', None], cooldown=lambda: next(checks, True))
+        self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 142.0)])
+        self.assertEqual(len([m for m in moves if m[0] == '冰雪魔像島補空檔']), 14)
+
+    def test_minimum_dwell_and_log_use_complete_loop_boundary(self):
+        moves, transfers, rows, _, _ = self.exercise_filler(1.0, 101.0, ['ice'])
+        self.assertEqual(len(moves), 14)  # 2 entry + 3 complete loops, 14s dwell
+        self.assertEqual([a for a, _ in transfers], ['ice'])
+        runtime = [r for r in rows if 'dwell_s' in r]
+        self.assertEqual(runtime[-1]['dwell_s'], 14.0)
+        self.assertEqual(runtime[-1]['circle'], 3)
+
+    def test_no_next_candidate_never_teleports_village_early(self):
+        moves, transfers, _, _, worked = self.exercise_filler(3.0, 200.0, ['ice', None])
+        self.assertTrue(worked)
+        self.assertEqual(transfers, [('ice', 100.0)])
+        self.assertEqual(len(moves), 34)  # remain on this island until due, no re-entry
 
     def test_main_cycles_one_is_primary_three_only(self):
         self.assertEqual(cf.primary_cycle_limit(1), 3)
@@ -128,18 +118,17 @@ class IslandFillerContractTest(unittest.TestCase):
               patch.object(cf, "leg", side_effect=fake_leg),
               patch.object(cf.time, "time", side_effect=lambda: now[0]),
               patch.object(cf.time, "perf_counter", side_effect=lambda: now[0])):
-            # The mocked gesture crosses the deadline on its first completion.
-            # This verifies the physical gesture is not split and the filler
-            # returns cleanly without a route-duration estimate.
+            # The deadline arrives during loop gesture #3. Finish #4 too,
+            # rather than leaving the island at a mid-loop coordinate.
             def finish_after_gesture(*args, **kwargs):
                 calls.append((args[1], args[2]))
-                now[0] = 105.0
+                now[0] += 3.0
                 return args[0]
             with patch.object(cf, "leg", side_effect=finish_after_gesture):
                 cf.run_island_filler(lambda _: None, 105.0)
 
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0], cf.route_act(cf.ISLAND_ROUTES["ice"][0])[:2])
+        self.assertEqual(calls, [cf.route_act(act)[:2] for act in cf.ROUTES['ice']])
+        self.assertEqual(now[0], 108.0)
 
 
 if __name__ == "__main__":

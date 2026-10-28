@@ -309,12 +309,14 @@ def choose_island(excluded=None):
 
 
 def island_actions(area, max_loops=4):
-    """Yield entry once, then at most ``max_loops`` complete loop gestures."""
+    """Yield entry once, then loops (``None`` allows safe dwell/cooldown overruns)."""
     route = ROUTES[area]
     yield from route[:ISLAND_ENTRY_LEGS]
     loop = route[ISLAND_ENTRY_LEGS:]
-    for _ in range(max_loops):
+    while max_loops is None or max_loops > 0:
         yield from loop
+        if max_loops is not None:
+            max_loops -= 1
 
 
 def island_dwell_elapsed(start):
@@ -462,11 +464,11 @@ def teleport(area, rec):
             rec({"note": f"等傳送石冷卻 {wait:.1f}s"})
             time.sleep(wait)
     adb.tap(*HEART)
-    _last_teleport = time.time()
     time.sleep(TELEPORT_WAIT)
     adb.swipe(*MENU_SCROLL_FROM, *MENU_SCROLL_TO, MENU_SCROLL_MS)
     time.sleep(TELEPORT_WAIT)
     adb.tap(*TILE[area])
+    _last_teleport = time.time()
     time.sleep(TELEPORT_WAIT)
     rec({"note": f"傳送 {area}", "big": True,
          "show": f"[{LABEL[area]}] 傳送完成"})
@@ -575,64 +577,50 @@ def run_area(area, rec, no_pearl=False):
 
 
 def run_island_filler(rec, deadline):
-    """Fill the gap with real-time island dwell and safe island switching.
+    """Fill until deadline, yielding only after a complete loop and >=12s dwell.
 
-    Island time is measured with ``perf_counter`` rather than route estimates.
-    Each island is capped at four full loops. Once the tree deadline arrives,
-    safe gestures continue until the minimum dwell and teleport cooldown are
-    both satisfied, then the completed gesture is followed by a return to the
-    village.
+    Cooldown/minimum-dwell overruns and missing alternatives keep the current
+    loop moving. The caller's run_area owns the village transfer; a bounded
+    --minutes run can instead stop here without an unnecessary return trip.
     """
-    did_work = False
-    last_left = None
+    area = choose_island()
+    if area is None:
+        return False
     while True:
-        area = choose_island({last_left} if last_left else set())
-        if area is None:
-            if did_work and _teleport_cooldown_ready():
-                rec({"note": "島嶼無可切換候選，返回村莊", "decision": "return"})
-                teleport("village", rec)
-            return did_work
-        did_work = True
         teleport(area, rec)
         rec({"note": f"[{LABEL[area]}] 開始補空檔", "big": True})
         img = shot() if MEASURE else None
         island_started = time.perf_counter()
-        loop_count = 0
-        for n, act in enumerate(island_actions(area), 1):
+        loop_size = len(ROUTES[area]) - ISLAND_ENTRY_LEGS
+        no_alternative = False
+        for n, act in enumerate(island_actions(area, max_loops=None), 1):
             d, px, override = route_act(act)
             img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
                       drag_len=override if override is not None else 300,
                       settle=0)
             dwell = island_dwell_elapsed(island_started)
-            if n > ISLAND_ENTRY_LEGS:
-                loop_count = (n - ISLAND_ENTRY_LEGS - 1) // (len(ROUTES[area]) - ISLAND_ENTRY_LEGS) + 1
+            loop_count = max(0, (n - ISLAND_ENTRY_LEGS + loop_size - 1) // loop_size)
             rec({"note": f"{LABEL[area]}島停留 {dwell:.1f}s，第{n}個手勢",
                  "island": area, "dwell_s": round(dwell, 3),
-                 "gesture": n,
-                 "circle": loop_count, "loop": loop_count})
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                # A tree deadline never cancels the island's 12s minimum.
-                # After that, keep safe gestures only until teleport is safe.
-                if dwell >= ISLAND_MIN_DWELL and _teleport_cooldown_ready():
-                    rec({"note": f"{LABEL[area]}島返回村莊（樹已可採且冷卻完成）",
-                         "island": area, "decision": "return"})
-                    teleport("village", rec)
-                    return did_work
+                 "gesture": n, "circle": loop_count, "loop": loop_count})
+            if n <= ISLAND_ENTRY_LEGS or (n - ISLAND_ENTRY_LEGS) % loop_size:
                 continue
-            if dwell >= ISLAND_MIN_DWELL and loop_count >= 4:
-                rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
-                     "island": area, "loop": loop_count, "decision": "switch"})
-                last_left = area
-                break
-
-        else:
-            # Four complete loops are the hard cap.  Selection on the next
-            # pass excludes only the island just left; later switches may
-            # select an earlier island again.
-            last_left = area
+            if dwell < ISLAND_MIN_DWELL or not _teleport_cooldown_ready():
+                continue
+            if time.time() >= deadline:
+                rec({"note": f"{LABEL[area]}島補空檔結束（期限已到且冷卻完成）",
+                     "island": area, "gesture": n, "decision": "return"})
+                return True
+            if no_alternative:
+                continue
+            next_area = choose_island({area})
+            if next_area is None:
+                no_alternative = True
+                continue
             rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
-                 "island": area, "loop": loop_count, "decision": "switch"})
+                 "island": area, "gesture": n, "loop": loop_count, "decision": "switch"})
+            area = next_area
+            break
 
 
 def main():
