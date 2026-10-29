@@ -41,6 +41,17 @@ class IslandFillerContractTest(unittest.TestCase):
                             for d, px, override in map(cf.route_act, loop))
         self.assertEqual(actions[2:], expected)
 
+    def test_all_islands_use_max_field_loop(self):
+        """四座島布局相同：外圈都是實測生怪區 + 保險，不能有哪座偷偷縮水。"""
+        w = cf.ISLAND_FIELD_W + cf.ISLAND_EDGE_MARGIN
+        h = cf.ISLAND_FIELD_H + cf.ISLAND_EDGE_MARGIN
+        for area in cf.ISLANDS:
+            loop = [cf.route_act(a) for a in
+                    cf.ISLAND_ROUTES[area][cf.ISLAND_ENTRY_LEGS:]]
+            self.assertEqual(len(loop), 4, area)
+            self.assertEqual(sorted(p for d, p, _ in loop if d in "NS"), [h, h], area)
+            self.assertEqual(sorted(p for d, p, _ in loop if d in "LR"), [w, w], area)
+
     def test_island_dwell_uses_real_elapsed_seconds(self):
         self.assertEqual(cf.ISLAND_MIN_DWELL, 12.0)
         with patch.object(cf.time, "time", return_value=100.0), \
@@ -95,7 +106,7 @@ class IslandFillerContractTest(unittest.TestCase):
             moves, transfers, rows, _, _ = self.exercise_filler(
                 0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
         self.assertEqual([a for a, _ in transfers], ['ice'])
-        self.assertEqual(len(moves), 19)  # entry2 + five gestures before boundary return
+        self.assertEqual(len(moves), 24)  # 0.5s/手勢 → 第 24 個剛好 12.0 秒，立刻離開
         self.assertEqual(rows[-1]['decision'], 'return')
 
     def test_switch_waits_for_cooldown_by_walking_more_loops(self):

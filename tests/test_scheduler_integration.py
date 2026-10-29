@@ -166,10 +166,12 @@ class SchedulerIntegrationTest(unittest.TestCase):
         self.assertEqual(sum(point == cf.TILE['village'] for point, _ in transfers), 1)
         self.assertIn(transfers[-1][0], [cf.TILE[a] for a in cf.ISLANDS])
         movement = [args for kind, args, _ in events if kind == 'swipe' and args[:2] == cf.DRAG]
-        self.assertIn(movement[-1][2:4], {
-            (720, 2900),  # north/south route segment after a shrunken loop
-            (420, 2600),  # legacy full-width expectation
-        })
+        # 最後一個手勢一定還是島上的路線段（不是選單滑動、不是傳送回村）。
+        # 只驗它是四個合法方向之一，不驗是哪一個 —— 迴圈距離或內縮改了，最後一段會跟著變。
+        drag = cf.DRAG[0], cf.DRAG[1]
+        legal = {(drag[0] + dx, drag[1] + dy)
+                 for dx, dy in ((300, 0), (-300, 0), (0, 300), (0, -300))}
+        self.assertIn(movement[-1][2:4], legal)
 
     def test_real_main_filler_and_run_area_have_one_village_transfer(self):
         clock, events = self.real_main_events(2.3)
