@@ -250,6 +250,7 @@ START_PREFIX = [
 # 路線還空著的島排程器會自動跳過（不會傳送過去發呆）。
 ISLANDS = ("ice", "shark", "duck", "truffle")
 ISLAND_ENTRY_LEGS = 2
+ISLAND_SHRINK_PX = 100.0       # 每個循環的每段距離向內縮 100px
 ISLAND_MIN_DWELL = 12.0
 VILLAGE_FIRST_CUT_INTERVAL = 105.0
 
@@ -331,14 +332,21 @@ def choose_island(excluded=None):
 
 
 def island_actions(area, max_loops=4):
-    """Yield entry once, then loops (``None`` allows safe dwell/cooldown overruns)."""
+    """Yield entry once, then nested loops shrinking each leg by 100px."""
     route = ROUTES[area]
     yield from route[:ISLAND_ENTRY_LEGS]
     loop = route[ISLAND_ENTRY_LEGS:]
-    while max_loops is None or max_loops > 0:
-        yield from loop
-        if max_loops is not None:
-            max_loops -= 1
+    loop_size = len(loop)
+    loop_number = 0
+    while max_loops is None or loop_number < max_loops:
+        shrink = ISLAND_SHRINK_PX * loop_number
+        for act in loop:
+            direction, px, override = route_act(act)
+            next_px = px - shrink
+            if next_px <= 0:
+                return
+            yield (direction, next_px, override)
+        loop_number += 1
 
 
 def island_dwell_elapsed(start):
@@ -665,6 +673,10 @@ def run_island_filler(rec, deadline, visited=None):
                  "island": area, "gesture": n, "loop": loop_count, "decision": "switch"})
             area = next_area
             break
+        else:
+            rec({"note": f"{LABEL[area]}島循環距離已縮到邊界，回主區",
+                 "island": area, "decision": "return"})
+            return True
 
 
 def main():

@@ -34,7 +34,12 @@ class IslandFillerContractTest(unittest.TestCase):
     def test_island_route_entry_once_then_unbounded_laps(self):
         actions = list(itertools.islice(cf.island_actions("shark"), 2 + 4 * 4))
         self.assertEqual(actions[:2], cf.ISLAND_ROUTES["shark"][:2])
-        self.assertEqual(actions[2:], cf.ISLAND_ROUTES["shark"][2:] * 4)
+        loop = cf.ISLAND_ROUTES["shark"][2:]
+        expected = []
+        for n in range(4):
+            expected.extend((d, px - n * cf.ISLAND_SHRINK_PX, override)
+                            for d, px, override in map(cf.route_act, loop))
+        self.assertEqual(actions[2:], expected)
 
     def test_island_dwell_uses_real_elapsed_seconds(self):
         self.assertEqual(cf.ISLAND_MIN_DWELL, 12.0)
@@ -90,7 +95,7 @@ class IslandFillerContractTest(unittest.TestCase):
             moves, transfers, rows, _, _ = self.exercise_filler(
                 0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
         self.assertEqual([a for a, _ in transfers], ['ice'])
-        self.assertEqual(len(moves), 24)  # entry 2 + five complete gestures after 12s
+        self.assertEqual(len(moves), 19)  # entry2 + five gestures before boundary return
         self.assertEqual(rows[-1]['decision'], 'return')
 
     def test_switch_waits_for_cooldown_by_walking_more_loops(self):
