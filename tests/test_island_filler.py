@@ -80,7 +80,7 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertTrue(worked)
         self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 118.0)])
         self.assertEqual([r['gesture'] for r in rows if r.get('decision') == 'switch'], [6])
-        self.assertGreaterEqual(len([m for m in moves if m[0] == '鯊魚島補空檔']), 6)
+        self.assertGreaterEqual(len([m for m in moves if m[0] == '鯊魚島補空檔']), 4)
         self.assertEqual(len(choose.call_args_list), 2)   # 起點一次、換島一次
         # 註：mock 記的是同一個 set 的參考，事後看內容一定是累積後的，故只驗次數。
 
@@ -90,7 +90,7 @@ class IslandFillerContractTest(unittest.TestCase):
             moves, transfers, rows, _, _ = self.exercise_filler(
                 0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
         self.assertEqual([a for a, _ in transfers], ['ice'])
-        self.assertEqual(len(moves), 26)  # entry 2 + six full loops; teleport() owns cooldown
+        self.assertEqual(len(moves), 24)  # entry 2 + five complete gestures after 12s
         self.assertEqual(rows[-1]['decision'], 'return')
 
     def test_switch_waits_for_cooldown_by_walking_more_loops(self):
@@ -102,10 +102,10 @@ class IslandFillerContractTest(unittest.TestCase):
 
     def test_minimum_dwell_and_log_use_complete_loop_boundary(self):
         moves, transfers, rows, _, _ = self.exercise_filler(1.0, 101.0, ['ice'])
-        self.assertEqual(len(moves), 14)  # 2 entry + 3 complete loops, 14s dwell
+        self.assertEqual(len(moves), 12)  # entry 2 + two complete loops, then the deadline interrupts
         self.assertEqual([a for a, _ in transfers], ['ice'])
         runtime = [r for r in rows if 'dwell_s' in r]
-        self.assertEqual(runtime[-1]['dwell_s'], 14.0)
+        self.assertEqual(runtime[-1]['dwell_s'], 12.0)
         self.assertEqual(runtime[-1]['circle'], 3)
 
     def test_all_islands_used_up_returns_without_reentry(self):
@@ -165,8 +165,8 @@ class IslandFillerContractTest(unittest.TestCase):
             with patch.object(cf, "leg", side_effect=finish_after_gesture):
                 cf.run_island_filler(lambda _: None, 105.0)
 
-        self.assertEqual(calls, [cf.route_act(act)[:2] for act in cf.ROUTES['ice']])
-        self.assertEqual(now[0], 108.0)
+        self.assertEqual(calls, [cf.route_act(act)[:2] for act in cf.ROUTES['ice'][:-1]])
+        self.assertEqual(now[0], 105.0)
 
 
 if __name__ == "__main__":

@@ -643,14 +643,18 @@ def run_island_filler(rec, deadline, visited=None):
             rec({"note": f"{LABEL[area]}島停留 {dwell:.1f}s，第{n}個手勢",
                  "island": area, "dwell_s": round(dwell, 3),
                  "gesture": n, "circle": loop_count, "loop": loop_count})
-            if n <= ISLAND_ENTRY_LEGS or (n - ISLAND_ENTRY_LEGS) % loop_size:
+            if n <= ISLAND_ENTRY_LEGS:
                 continue
-            if dwell < ISLAND_MIN_DWELL:
-                continue
-            if time.time() >= deadline:
+            # Once the island minimum is satisfied, a deadline return may
+            # leave after any completed gesture; never split the in-flight swipe.
+            if dwell >= ISLAND_MIN_DWELL and time.time() >= deadline:
                 rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
                      "island": area, "gesture": n, "decision": "return"})
                 return True
+            if (n - ISLAND_ENTRY_LEGS) % loop_size:
+                continue
+            if dwell < ISLAND_MIN_DWELL:
+                continue
             next_area = choose_island(visited)
             if next_area is None:
                 rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，四座都逛過 → 回主區",
