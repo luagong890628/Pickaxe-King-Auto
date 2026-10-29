@@ -90,15 +90,15 @@ class IslandFillerContractTest(unittest.TestCase):
             moves, transfers, rows, _, _ = self.exercise_filler(
                 0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
         self.assertEqual([a for a, _ in transfers], ['ice'])
-        self.assertEqual(len(moves), 34)  # entry 2 + eight full loops
+        self.assertEqual(len(moves), 26)  # entry 2 + six full loops; teleport() owns cooldown
         self.assertEqual(rows[-1]['decision'], 'return')
 
     def test_switch_waits_for_cooldown_by_walking_more_loops(self):
         checks = iter([False, False, True, True])
         moves, transfers, _, _, _ = self.exercise_filler(
             3.0, 145.0, ['ice', 'shark', None], cooldown=lambda: next(checks, True))
-        self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 142.0)])
-        self.assertEqual(len([m for m in moves if m[0] == '冰雪魔像島補空檔']), 14)
+        self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 118.0)])
+        self.assertEqual(len([m for m in moves if m[0] == '冰雪魔像島補空檔']), 6)
 
     def test_minimum_dwell_and_log_use_complete_loop_boundary(self):
         moves, transfers, rows, _, _ = self.exercise_filler(1.0, 101.0, ['ice'])

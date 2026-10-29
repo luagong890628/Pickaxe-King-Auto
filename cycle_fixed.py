@@ -645,10 +645,10 @@ def run_island_filler(rec, deadline, visited=None):
                  "gesture": n, "circle": loop_count, "loop": loop_count})
             if n <= ISLAND_ENTRY_LEGS or (n - ISLAND_ENTRY_LEGS) % loop_size:
                 continue
-            if dwell < ISLAND_MIN_DWELL or not _teleport_cooldown_ready():
+            if dwell < ISLAND_MIN_DWELL:
                 continue
             if time.time() >= deadline:
-                rec({"note": f"{LABEL[area]}島補空檔結束（期限已到且冷卻完成）",
+                rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
                      "island": area, "gesture": n, "decision": "return"})
                 return True
             next_area = choose_island(visited)
