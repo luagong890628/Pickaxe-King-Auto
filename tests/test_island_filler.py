@@ -6,17 +6,30 @@ import cycle_fixed as cf
 
 
 class IslandFillerContractTest(unittest.TestCase):
-    def test_weights_and_exclusion(self):
-        self.assertEqual(cf.ISLAND_WEIGHTS, {"ice": 30, "shark": 25, "duck": 25, "truffle": 20})
-        with patch.object(cf.random, "choices", return_value=["shark"]) as choices:
-            self.assertEqual(cf.choose_island({"ice"}), "shark")
-        choices.assert_called_once_with(
-            ["shark", "duck", "truffle"], weights=[25, 25, 20], k=1)
+    def test_fixed_order_round_robin(self):
+        """固定順序：冰雪 → 鯊魚 → 鴨子 → 松露 → 冰雪…（排除剛離開的那座）。"""
+        self.assertEqual(cf.choose_island(), "ice")
+        self.assertEqual(cf.choose_island({"ice"}), "shark")
+        self.assertEqual(cf.choose_island({"shark"}), "duck")
+        self.assertEqual(cf.choose_island({"duck"}), "truffle")
+        self.assertEqual(cf.choose_island({"truffle"}), "ice")     # 繞回第一座
 
-    def test_weighted_choice_uses_only_unused_candidates(self):
-        with patch.object(cf.random, "choices", return_value=["shark"]) as choices:
-            self.assertEqual(cf.choose_island(), "shark")
-        choices.assert_called_once_with(["ice", "shark", "duck", "truffle"], weights=[30, 25, 25, 20], k=1)
+    def test_selection_ignores_respawn_time(self):
+        """不把重生時間寫成門檻：就算剛剛才去過，下一座照樣是固定順序的下一座。"""
+        self.assertEqual(cf.REFRESH["ice"], 0.0)
+        self.assertEqual(cf.choose_island({"ice"}), "shark")
+        self.assertEqual(cf.choose_island({"ice", "shark"}), "duck")
+
+    def test_skips_islands_without_route(self):
+        with patch.dict(cf.ROUTES, {"duck": []}, clear=False):
+            self.assertEqual(cf.choose_island({"shark"}), "truffle")
+            self.assertEqual(cf.choose_island({"truffle"}), "ice")
+
+    def test_returns_none_when_no_island_has_route(self):
+        empty = {a: [] for a in cf.ISLANDS}
+        with patch.dict(cf.ROUTES, empty, clear=False):
+            self.assertIsNone(cf.choose_island())
+            self.assertIsNone(cf.choose_island({"ice"}))
 
     def test_island_route_entry_once_then_unbounded_laps(self):
         actions = list(itertools.islice(cf.island_actions("shark"), 2 + 4 * 4))
@@ -30,10 +43,7 @@ class IslandFillerContractTest(unittest.TestCase):
             self.assertEqual(cf.island_dwell_elapsed(100.0), 12.5)
 
     def test_switch_island_excludes_only_island_just_left(self):
-        with patch.object(cf.random, "choices", return_value=["shark"]) as choices:
-            self.assertEqual(cf.choose_island({"ice"}), "shark")
-        choices.assert_called_once_with(
-            ["shark", "duck", "truffle"], weights=[25, 25, 20], k=1)
+        self.assertEqual(cf.choose_island({"ice"}), "shark")
 
     def test_farm_fill_pairs_is_not_shortened_by_deadline(self):
         self.assertEqual(cf.FILL_PAIRS, 6)
@@ -45,7 +55,8 @@ class IslandFillerContractTest(unittest.TestCase):
             cf.fill_cycle("farm", lambda _: None, None)
         self.assertEqual(calls, [("R", 700.0), ("L", 700.0)] * 6)
 
-    def exercise_filler(self, seconds, deadline, choices, cooldown=lambda: True):
+    def exercise_filler(self, seconds, deadline, choices, cooldown=lambda: True,
+                        visited=None):
         now = [100.0]
         moves, transfers, rows = [], [], []
 
@@ -60,7 +71,7 @@ class IslandFillerContractTest(unittest.TestCase):
               patch.object(cf, '_teleport_cooldown_ready', side_effect=lambda: cooldown()),
               patch.object(cf.time, 'time', side_effect=lambda: now[0]),
               patch.object(cf.time, 'perf_counter', side_effect=lambda: now[0])):
-            worked = cf.run_island_filler(rows.append, deadline)
+            worked = cf.run_island_filler(rows.append, deadline, visited)
         return moves, transfers, rows, choose, worked
 
     def test_few_seconds_left_switches_at_minimum_and_new_island_keeps_minimum(self):
@@ -70,7 +81,8 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 118.0)])
         self.assertEqual([r['gesture'] for r in rows if r.get('decision') == 'switch'], [6])
         self.assertGreaterEqual(len([m for m in moves if m[0] == '鯊魚島補空檔']), 6)
-        self.assertEqual(choose.call_args_list[1].args, ({'ice'},))
+        self.assertEqual(len(choose.call_args_list), 2)   # 起點一次、換島一次
+        # 註：mock 記的是同一個 set 的參考，事後看內容一定是累積後的，故只驗次數。
 
     def test_cooldown_unready_continues_complete_loops_without_menu_or_sleep(self):
         checks = iter([False, False, True])
@@ -96,11 +108,37 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(runtime[-1]['dwell_s'], 14.0)
         self.assertEqual(runtime[-1]['circle'], 3)
 
-    def test_no_next_candidate_never_teleports_village_early(self):
-        moves, transfers, _, _, worked = self.exercise_filler(3.0, 200.0, ['ice', None])
+    def test_all_islands_used_up_returns_without_reentry(self):
+        """四座都逛過（choose_island 回 None）→ 直接回主區，不再原地重複繞。"""
+        moves, transfers, rows, _, worked = self.exercise_filler(3.0, 200.0, ['ice', None])
         self.assertTrue(worked)
         self.assertEqual(transfers, [('ice', 100.0)])
-        self.assertEqual(len(moves), 34)  # remain on this island until due, no re-entry
+        self.assertEqual(len(moves), 6)  # 3s/手勢 → 第 6 個手勢（2 進場+1 圈）就滿 12 秒
+        self.assertEqual(rows[-1]['decision'], 'return')
+
+    def test_one_trip_per_island_per_window(self):
+        """同一個窗口內每座島只去一次：逛完四座就回主區（實測一趟約 15 秒）。"""
+        now = [100.0]
+        transfers = []
+        visited = set()
+
+        def move(img, d, px, rec, label, **kw):
+            now[0] += 3.0
+            return img
+
+        with (patch.object(cf, 'teleport', side_effect=lambda area, rec: transfers.append(area)),
+              patch.object(cf, 'leg', side_effect=move),
+              patch.object(cf, '_teleport_cooldown_ready', return_value=True),
+              patch.object(cf.time, 'time', side_effect=lambda: now[0]),
+              patch.object(cf.time, 'perf_counter', side_effect=lambda: now[0])):
+            worked = cf.run_island_filler(lambda _: None, 1000.0, visited)
+            again = cf.run_island_filler(lambda _: None, 1000.0, visited)
+
+        self.assertTrue(worked)
+        self.assertEqual(transfers, list(cf.ISLANDS))     # 固定順序、四座各一次
+        self.assertEqual(visited, set(cf.ISLANDS))
+        self.assertFalse(again)                            # 同一個窗口再問就沒島可去
+        self.assertEqual(transfers, list(cf.ISLANDS))      # 不會再傳送
 
     def test_main_cycles_one_is_primary_three_only(self):
         self.assertEqual(cf.primary_cycle_limit(1), 3)

@@ -64,7 +64,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, no_pearl=False):
+            def fill(rec, deadline, visited=None):
                 clock.sleep(20.0)
                 return False
             return fill
@@ -82,7 +82,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, no_pearl=False):
+            def fill(rec, deadline, visited=None):
                 clock.sleep(min(30.0, max(0.1, deadline - clock.now)))
                 return False
             return fill
@@ -98,7 +98,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, no_pearl=False):
+            def fill(rec, deadline, visited=None):
                 return False
             return fill
 
@@ -106,6 +106,27 @@ class SchedulerIntegrationTest(unittest.TestCase):
         self.assertLess(len(stations), 5)
         self.assertTrue(any(seconds > 0 for seconds in clock.sleeps))
         self.assertLess(len(clock.sleeps), 100)
+
+    def test_filler_visited_resets_after_village_recut(self):
+        """每座島一輪只去一次：小村莊重新採集（＝新的補空檔窗口）就清空。"""
+        def run_area(area, rec, no_pearl, clock):
+            clock.now += 5.0 if area == 'village' else 10.0
+            return (clock.now if area == 'village' else None), None
+
+        seen = []
+
+        def filler(clock):
+            def fill(rec, deadline, visited=None):
+                seen.append(set(visited))          # 記下「進來時」的狀態
+                visited.add('ice')                 # 假裝剛逛完冰雪島
+                clock.sleep(min(20.0, max(0.1, deadline - clock.now)))
+                return False
+            return fill
+
+        self.run_main(4.0, run_area, filler)
+        self.assertEqual(seen[0], set())           # 第一個窗口從空的開始
+        self.assertIn({'ice'}, seen)               # 同一個窗口內會累積
+        self.assertEqual(seen[-1], set())          # 小村莊重採後又回到空的
 
     def real_main_events(self, minutes):
         clock = FakeClock()
@@ -131,7 +152,6 @@ class SchedulerIntegrationTest(unittest.TestCase):
                       patch.object(cf.adb, 'tap', side_effect=tap),
                       patch.object(cf.adb, 'swipe', side_effect=swipe),
                       patch.object(cf.adb, 'screencap', side_effect=AssertionError('no phone')),
-                      patch.object(cf.random, 'choices', side_effect=lambda items, weights, k: [items[0]]),
                       contextlib.redirect_stdout(io.StringIO())):
                     cf.main()
             finally:
@@ -181,8 +201,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
               patch.object(cf.time, 'sleep', side_effect=clock.sleep),
               patch.object(cf.time, 'perf_counter', side_effect=fake_perf_counter),
               patch.object(cf, 'teleport', side_effect=fake_teleport),
-              patch.object(cf, 'leg', side_effect=fake_leg),
-              patch.object(cf.random, 'choices', side_effect=lambda items, weights, k: [items[0]])):
+              patch.object(cf, 'leg', side_effect=fake_leg)):
             worked = cf.run_island_filler(lambda _: None, 100.0)
 
         self.assertTrue(worked)

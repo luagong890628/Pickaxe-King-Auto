@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import random
 import time
 from pathlib import Path
 
@@ -245,15 +244,20 @@ START_PREFIX = [
 ]
 
 # ---- 島嶼：多餘時間（主三區都在刷新）才去 ----
-# 使用者 2026-10-26：鯊魚島、松露島、冰雪魔像島、鴨子島「可以用隨機」，
-# 但優先序是 冰雪魔像 > 鯊魚島 > 鴨子島 > 松露島 → ISLANDS 的順序就是優先序。
-# 四個島**布局相同**，只有傳送落點不同 → 每島各自一份路線，靠實走慢慢調。
+# 使用者 2026-10-29：**固定順序** 冰雪魔像 → 鯊魚 → 鴨子 → 松露，排除剛離開的那座。
+# 不要用權重抽選，也不要把重生時間寫成門檻（重生只是大約值：冰雪實測 108 秒，
+# 四座島之後還會再降）。同一個補空檔窗口內每座島只去一次，逛完四座就回主區等樹。
 # 路線還空著的島排程器會自動跳過（不會傳送過去發呆）。
 ISLANDS = ("ice", "shark", "duck", "truffle")
-ISLAND_WEIGHTS = {"ice": 30, "shark": 25, "duck": 25, "truffle": 20}
 ISLAND_ENTRY_LEGS = 2
 ISLAND_MIN_DWELL = 12.0
 VILLAGE_FIRST_CUT_INTERVAL = 105.0
+
+# 一趟島的實際耗時（傳送 → 下一座傳送），2026-10-29 由 6 小時執行紀錄統計：
+#   冰雪 13.6s、鯊魚 15.1s、鴨子 14.6s、松露 15.2s（中位數都是 14～15 秒）
+# 只用在 --dry-run 的說明與人工估算；程式判斷一律用「這一輪去過了沒」，
+# 不把秒數寫進決策（重生時間只是大約值，寫死反而會擋掉還能採的島）。
+ISLAND_TRIP_SECONDS = 15.0
 
 ISLAND_LABEL = {"ice": "冰雪魔像島", "shark": "鯊魚島",
                 "duck": "鴨子島", "truffle": "松露島"}
@@ -282,7 +286,9 @@ REFRESH = {
     "village": 100.0,   # 樹重生（實測約 100 秒）
     "start": 100.0,     # 起始之地與小村莊同一批樹
     "farm": 240.0,      # 作物刷新 4 分鐘（使用者 2026-10-26 確認）
-    # 島嶼：只是拿來填空檔，隨時可去（0）；真的要走「刷新」再填秒數
+    # 島嶼：0＝不設刷新門檻（使用者 2026-10-29）。重生時間只是大約值
+    # （冰雪實測 108 秒、之後還會再降），寫死成門檻反而會擋掉還能採的島；
+    # 改用固定順序繞一輪，回來時自然就重生了。
     **{a: 0.0 for a in ISLANDS},
 }
 # 加新場地時：ROUTES 加路線、LABEL 加名稱、這裡加刷新秒數，排程器就會自動排進去。
@@ -302,14 +308,26 @@ def _overdue(area, now, last):
 
 
 def choose_island(excluded=None):
-    """Weighted choice among route-validated islands, excluding the last one."""
+    """固定順序：冰雪 → 鯊魚 → 鴨子 → 松露（排除已去過的）。
+
+    使用者 2026-10-29：不抽選、也不看重生時間（那是大約值，寫死成門檻反而擋掉能採的島）。
+    做法是「從被排除那些的下一座往後找」，所以順序固定、不會原地重複；
+    排除集合就是「這個補空檔窗口已經逛過的島」，全部去過就回傳 None（＝回主區等樹）。
+    路線還空著的島自動跳過。
+    """
     excluded = set() if excluded is None else set(excluded)
-    candidates = [a for a in ISLANDS
-                  if a not in excluded and ROUTES.get(a)]
-    if not candidates:
+    valid = [a for a in ISLANDS if ROUTES.get(a)]
+    if not valid:
         return None
-    return random.choices(candidates,
-                          weights=[ISLAND_WEIGHTS[a] for a in candidates], k=1)[0]
+    start = 0
+    for a in ISLANDS:                      # 從被排除那座（＝剛離開的）的下一座開始
+        if a in excluded:
+            start = ISLANDS.index(a) + 1
+    for i in range(len(ISLANDS)):
+        area = ISLANDS[(start + i) % len(ISLANDS)]
+        if area not in excluded and area in valid:
+            return area
+    return None
 
 
 def island_actions(area, max_loops=4):
@@ -592,23 +610,29 @@ def run_area(area, rec, no_pearl=False):
     return first_cut, img
 
 
-def run_island_filler(rec, deadline):
+def run_island_filler(rec, deadline, visited=None):
     """Fill until deadline, yielding only after a complete loop and >=12s dwell.
 
-    Cooldown/minimum-dwell overruns and missing alternatives keep the current
-    loop moving. The caller's run_area owns the village transfer; a bounded
-    --minutes run can instead stop here without an unnecessary return trip.
+    ``visited`` 由呼叫端持有、跨多次呼叫累積：**同一個補空檔窗口內每座島只去一次**。
+    實測一趟島 13～16 秒，繞完四座約 60 秒；而島上樹木重生要一分鐘以上，
+    所以第五趟起就是走同一塊空地、收益接近 0。逛完四座就回主區等樹。
+    這裡刻意不寫任何重生秒數（那只是大約值），只用「這一輪去過了沒」當依據。
+
+    Cooldown/minimum-dwell overruns keep the current loop moving. The caller's
+    run_area owns the village transfer; a bounded --minutes run can instead
+    stop here without an unnecessary return trip.
     """
-    area = choose_island()
+    visited = set() if visited is None else visited
+    area = choose_island(visited)
     if area is None:
         return False
     while True:
         teleport(area, rec)
+        visited.add(area)
         rec({"note": f"[{LABEL[area]}] 開始補空檔", "big": True})
         img = shot() if MEASURE else None
         island_started = time.perf_counter()
         loop_size = len(ROUTES[area]) - ISLAND_ENTRY_LEGS
-        no_alternative = False
         for n, act in enumerate(island_actions(area, max_loops=None), 1):
             d, px, override = route_act(act)
             img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
@@ -627,12 +651,12 @@ def run_island_filler(rec, deadline):
                 rec({"note": f"{LABEL[area]}島補空檔結束（期限已到且冷卻完成）",
                      "island": area, "gesture": n, "decision": "return"})
                 return True
-            if no_alternative:
-                continue
-            next_area = choose_island({area})
+            next_area = choose_island(visited)
             if next_area is None:
-                no_alternative = True
-                continue
+                rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，四座都逛過 → 回主區",
+                     "island": area, "gesture": n, "loop": loop_count,
+                     "decision": "return", "visited": len(visited)})
+                return True
             rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
                  "island": area, "gesture": n, "loop": loop_count, "decision": "switch"})
             area = next_area
@@ -706,8 +730,11 @@ def main():
             print(f"  {LABEL[a]:8s} 刷新 {r:5.0f}s"
                   + ("（隨時可去）" if r <= 0 else "") + mark)
         print(f"  {'珍珠':8s} 冷卻 {PEARL_COOLDOWN:5.0f}s（附掛在小村莊，不會單獨跑一趟）")
-        print(f"  島嶼加權抽選：冰雪魔像:鯊魚:鴨子:松露 = "
-              f"{ISLAND_WEIGHTS['ice']}:{ISLAND_WEIGHTS['shark']}:{ISLAND_WEIGHTS['duck']}:{ISLAND_WEIGHTS['truffle']}")
+        print(f"  島嶼順序：{' → '.join(ISLAND_LABEL[a] for a in ISLANDS)}"
+              f"（固定順序；不抽選、不設重生門檻、同一個窗口內不回頭）")
+        print(f"  補空檔規則：一個窗口內每座島只去一次 → 最多 {len(ISLANDS)} 趟"
+              f"（一趟約 {ISLAND_TRIP_SECONDS:g}s，四趟約 "
+              f"{len(ISLANDS) * ISLAND_TRIP_SECONDS:g}s；逛完就回主區等樹）")
         print(f"　固定座標：愛心{HEART} 休息{REST_TAP}")
         return
 
@@ -772,6 +799,7 @@ def main():
     last_visit = {}          # area → 上一次開始採集的時刻
     steps = 0
     last_first_cut = None
+    filler_visited = set()   # 這一輪補空檔已經逛過的島（小村莊重新採集就清空）
 
     try:
         while time.time() < deadline and (step_limit is None or steps < step_limit):
@@ -782,12 +810,15 @@ def main():
                     filler_deadline = min(last_first_cut + VILLAGE_FIRST_CUT_INTERVAL,
                                           deadline)
                     if now < filler_deadline:
-                        did_work = run_island_filler(rec, filler_deadline)
+                        did_work = run_island_filler(rec, filler_deadline, filler_visited)
                         if did_work:
                             continue
-                        remaining = min(filler_deadline, deadline) - time.time()
-                        if remaining > 0:
-                            time.sleep(min(1.0, remaining))
+                        # 沒有可去的島（四座都逛過）→ 直接等主區刷新，不要空轉。
+                        # 重新算一次 wait：剛剛補空檔可能已經跑到別的主區該上場了。
+                        _, wait_now = next_stop(time.time(), last_visit, last_first_cut)
+                        end = min(time.time() + wait_now, filler_deadline, deadline)
+                        while time.time() < end:
+                            time.sleep(min(1.0, end - time.time()))
                         continue
                 rec({"note": f"{LABEL[area]} 還沒刷新，等 {wait:.0f}s", "big": True,
                      "show": f"等 {LABEL[area]} 刷新 {wait:.0f}s"})
@@ -806,6 +837,7 @@ def main():
             first_cut, _ = run_area(area, rec, args.no_pearl)
             if first_cut is not None:
                 last_first_cut = first_cut
+                filler_visited.clear()      # 小村莊重新採集 → 新的補空檔窗口
 
             if args.wait:
                 time.sleep(args.wait)
