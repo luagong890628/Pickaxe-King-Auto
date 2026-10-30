@@ -183,8 +183,8 @@ class IslandFillerContractTest(unittest.TestCase):
                 cf.run_island_filler(lambda _: None, 105.0)
 
         self.assertEqual(calls, [
-            ('N', 950.0), ('L', 500.0), ('S', 860.0),
-            ('R', 1000.0), ('N', 760.0),
+            ('N', 950.0), ('L', 500.0), ('S', cf.ISLAND_LOOP_H),
+            ('R', cf.ISLAND_LOOP_W), ('N', cf.ISLAND_LOOP_H - cf.ISLAND_SHRINK_PX),
         ])
         self.assertEqual(now[0], 105.0)
 
