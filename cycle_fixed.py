@@ -361,29 +361,19 @@ ISLAND_RING_MARK = "RING"      # 一圈結束的標記（island_actions → run_
 
 
 def island_actions(area, max_loops=4):
-    """進場一次，然後同心圈：每圈先往內挪 ISLAND_SHRINK_PX，再走縮小的 4 段。
-
-    為什麼每圈要多 2 段「往內挪」：一個閉合的 4 段矩形一定會回到自己的出發角落，
-    所以只把 4 段縮短，新的一圈會貼著原本的兩條邊走（等於重走同一塊地）。
-    先往內挪 100，新的一圈四條邊才會都是沒走過的地。
-
-    內縮方向＝循環前兩段的方向（從角落往內就是那兩個方向），四座島都成立。
-    每圈結束送一個 ISLAND_RING_MARK，讓呼叫端用「標記」而不是「餘數」判斷圈邊界。
-    """
+    """進場一次，然後以四段螺旋向內掃描；每兩段各縮 100px。"""
     route = ROUTES[area]
     yield from route[:ISLAND_ENTRY_LEGS]
     loop = [route_act(act) for act in route[ISLAND_ENTRY_LEGS:]]
-    inward = (loop[0][0], loop[1][0])
-    for ring in range(max_loops or 10 ** 6):
-        if ring:
-            for direction in inward:
-                yield (direction, ISLAND_SHRINK_PX)
-        for direction, px, override in loop:
-            next_px = px - 2 * ISLAND_SHRINK_PX * ring
-            if next_px <= 0:
-                return
-            yield (direction, next_px, override)
-        yield (ISLAND_RING_MARK,)
+    loop_size = len(loop)
+    for i in range((max_loops or 10 ** 6) * loop_size):
+        direction, base_px, override = loop[i % loop_size]
+        next_px = base_px - ISLAND_SHRINK_PX * (i // 2)
+        if next_px <= 0:
+            return
+        yield (direction, next_px, override)
+        if i % loop_size == loop_size - 1:
+            yield (ISLAND_RING_MARK,)
 
 
 def island_dwell_elapsed(start):

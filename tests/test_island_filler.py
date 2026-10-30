@@ -31,20 +31,17 @@ class IslandFillerContractTest(unittest.TestCase):
             self.assertIsNone(cf.choose_island())
             self.assertIsNone(cf.choose_island({"ice"}))
 
-    def test_island_rings_are_concentric(self):
-        """每圈先往內挪 2 段，再走縮小的 4 段（4 段同步各減 2×shrink）。"""
-        acts = list(itertools.islice(cf.island_actions("ice", max_loops=2), 40))
+    def test_island_rings_are_spiral(self):
+        """四段螺旋：每兩段各縮一個 shrink，沒有額外內移手勢。"""
+        acts = list(itertools.islice(cf.island_actions("ice", max_loops=2), 20))
         base = [cf.route_act(a) for a in cf.ISLAND_ROUTES["ice"][cf.ISLAND_ENTRY_LEGS:]]
         self.assertEqual(acts[:2], list(cf.ISLAND_ROUTES["ice"][:cf.ISLAND_ENTRY_LEGS]))
-        # 第 1 圈＝原本的 4 段（外圈滿版）
-        self.assertEqual([a[:2] for a in acts[2:6]], [b[:2] for b in base])
+        expected = [(d, px - (i // 2) * cf.ISLAND_SHRINK_PX, override)
+                    for i, (d, px, override) in enumerate(base * 2)]
+        self.assertEqual(acts[2:6], expected[:4])
         self.assertEqual(acts[6], (cf.ISLAND_RING_MARK,))
-        # 第 2 圈＝先往內挪（方向＝前兩段方向），再把 4 段各減 2×shrink
-        self.assertEqual(acts[7:9], [(base[0][0], cf.ISLAND_SHRINK_PX),
-                                     (base[1][0], cf.ISLAND_SHRINK_PX)])
-        self.assertEqual([a[:2] for a in acts[9:13]],
-                         [(d, px - 2 * cf.ISLAND_SHRINK_PX) for d, px, _ in base])
-        self.assertEqual(acts[13], (cf.ISLAND_RING_MARK,))
+        self.assertEqual(acts[7:11], expected[4:8])
+        self.assertEqual(acts[11], (cf.ISLAND_RING_MARK,))
 
     def test_all_islands_use_max_field_loop(self):
         """四座島布局相同：外圈都是實走定案的 ISLAND_LOOP_W × ISLAND_LOOP_H。"""
@@ -110,7 +107,7 @@ class IslandFillerContractTest(unittest.TestCase):
             moves, transfers, rows, _, _ = self.exercise_filler(
                 0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
         self.assertEqual([a for a, _ in transfers], ['ice'])
-        self.assertEqual(len(moves), 24)  # 0.5s/手勢 → 第 24 個剛好 12.0 秒，立刻離開
+        self.assertEqual(len(moves), 20)  # entry2 + 18 spiral gestures before the deadline boundary
         self.assertEqual(rows[-1]['decision'], 'return')
 
     def test_switch_waits_for_cooldown_by_walking_more_loops(self):
@@ -126,7 +123,7 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual([a for a, _ in transfers], ['ice'])
         runtime = [r for r in rows if 'dwell_s' in r]
         self.assertEqual(runtime[-1]['dwell_s'], 12.0)
-        self.assertEqual(runtime[-1]['circle'], 1)   # 第 1 圈已標記完成，正在走第 2 圈
+        self.assertEqual(runtime[-1]['circle'], 2)
 
     def test_all_islands_used_up_returns_without_reentry(self):
         """四座都逛過（choose_island 回 None）→ 直接回主區，不再原地重複繞。"""
@@ -185,7 +182,10 @@ class IslandFillerContractTest(unittest.TestCase):
             with patch.object(cf, "leg", side_effect=finish_after_gesture):
                 cf.run_island_filler(lambda _: None, 105.0)
 
-        self.assertEqual(calls, [cf.route_act(act)[:2] for act in cf.ROUTES['ice'][:-1]])
+        self.assertEqual(calls, [
+            ('N', 950.0), ('L', 500.0), ('S', 860.0),
+            ('R', 1000.0), ('N', 760.0),
+        ])
         self.assertEqual(now[0], 105.0)
 
 
