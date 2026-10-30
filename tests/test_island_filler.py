@@ -31,15 +31,20 @@ class IslandFillerContractTest(unittest.TestCase):
             self.assertIsNone(cf.choose_island())
             self.assertIsNone(cf.choose_island({"ice"}))
 
-    def test_island_route_entry_once_then_unbounded_laps(self):
-        actions = list(itertools.islice(cf.island_actions("shark"), 2 + 4 * 4))
-        self.assertEqual(actions[:2], cf.ISLAND_ROUTES["shark"][:2])
-        loop = cf.ISLAND_ROUTES["shark"][2:]
-        expected = []
-        for n in range(4):
-            expected.extend((d, px - n * cf.ISLAND_SHRINK_PX, override)
-                            for d, px, override in map(cf.route_act, loop))
-        self.assertEqual(actions[2:], expected)
+    def test_island_rings_are_concentric(self):
+        """每圈先往內挪 2 段，再走縮小的 4 段（4 段同步各減 2×shrink）。"""
+        acts = list(itertools.islice(cf.island_actions("ice", max_loops=2), 40))
+        base = [cf.route_act(a) for a in cf.ISLAND_ROUTES["ice"][cf.ISLAND_ENTRY_LEGS:]]
+        self.assertEqual(acts[:2], list(cf.ISLAND_ROUTES["ice"][:cf.ISLAND_ENTRY_LEGS]))
+        # 第 1 圈＝原本的 4 段（外圈滿版）
+        self.assertEqual([a[:2] for a in acts[2:6]], [b[:2] for b in base])
+        self.assertEqual(acts[6], (cf.ISLAND_RING_MARK,))
+        # 第 2 圈＝先往內挪（方向＝前兩段方向），再把 4 段各減 2×shrink
+        self.assertEqual(acts[7:9], [(base[0][0], cf.ISLAND_SHRINK_PX),
+                                     (base[1][0], cf.ISLAND_SHRINK_PX)])
+        self.assertEqual([a[:2] for a in acts[9:13]],
+                         [(d, px - 2 * cf.ISLAND_SHRINK_PX) for d, px, _ in base])
+        self.assertEqual(acts[13], (cf.ISLAND_RING_MARK,))
 
     def test_all_islands_use_max_field_loop(self):
         """四座島布局相同：外圈都是實走定案的 ISLAND_LOOP_W × ISLAND_LOOP_H。"""
@@ -121,7 +126,7 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual([a for a, _ in transfers], ['ice'])
         runtime = [r for r in rows if 'dwell_s' in r]
         self.assertEqual(runtime[-1]['dwell_s'], 12.0)
-        self.assertEqual(runtime[-1]['circle'], 3)
+        self.assertEqual(runtime[-1]['circle'], 1)   # 第 1 圈已標記完成，正在走第 2 圈
 
     def test_all_islands_used_up_returns_without_reentry(self):
         """四座都逛過（choose_island 回 None）→ 直接回主區，不再原地重複繞。"""

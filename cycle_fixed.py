@@ -357,22 +357,33 @@ def choose_island(excluded=None):
     return None
 
 
+ISLAND_RING_MARK = "RING"      # 一圈結束的標記（island_actions → run_island_filler）
+
+
 def island_actions(area, max_loops=4):
-    """Yield entry once, then nested loops shrinking each leg by 100px."""
+    """進場一次，然後同心圈：每圈先往內挪 ISLAND_SHRINK_PX，再走縮小的 4 段。
+
+    為什麼每圈要多 2 段「往內挪」：一個閉合的 4 段矩形一定會回到自己的出發角落，
+    所以只把 4 段縮短，新的一圈會貼著原本的兩條邊走（等於重走同一塊地）。
+    先往內挪 100，新的一圈四條邊才會都是沒走過的地。
+
+    內縮方向＝循環前兩段的方向（從角落往內就是那兩個方向），四座島都成立。
+    每圈結束送一個 ISLAND_RING_MARK，讓呼叫端用「標記」而不是「餘數」判斷圈邊界。
+    """
     route = ROUTES[area]
     yield from route[:ISLAND_ENTRY_LEGS]
-    loop = route[ISLAND_ENTRY_LEGS:]
-    loop_size = len(loop)
-    loop_number = 0
-    while max_loops is None or loop_number < max_loops:
-        shrink = ISLAND_SHRINK_PX * loop_number
-        for act in loop:
-            direction, px, override = route_act(act)
-            next_px = px - shrink
+    loop = [route_act(act) for act in route[ISLAND_ENTRY_LEGS:]]
+    inward = (loop[0][0], loop[1][0])
+    for ring in range(max_loops or 10 ** 6):
+        if ring:
+            for direction in inward:
+                yield (direction, ISLAND_SHRINK_PX)
+        for direction, px, override in loop:
+            next_px = px - 2 * ISLAND_SHRINK_PX * ring
             if next_px <= 0:
                 return
             yield (direction, next_px, override)
-        loop_number += 1
+        yield (ISLAND_RING_MARK,)
 
 
 def island_dwell_elapsed(start):
@@ -666,39 +677,44 @@ def run_island_filler(rec, deadline, visited=None):
         rec({"note": f"[{LABEL[area]}] 開始補空檔", "big": True})
         img = shot() if MEASURE else None
         island_started = time.perf_counter()
-        loop_size = len(ROUTES[area]) - ISLAND_ENTRY_LEGS
-        for n, act in enumerate(island_actions(area, max_loops=None), 1):
+        gesture = 0
+        loop_count = 0
+        dwell = 0.0
+        for act in island_actions(area, max_loops=None):
+            if act[0] == ISLAND_RING_MARK:
+                loop_count += 1
+                if dwell < ISLAND_MIN_DWELL:
+                    continue
+                if time.time() >= deadline:
+                    rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
+                         "island": area, "gesture": gesture, "decision": "return"})
+                    return True
+                next_area = choose_island(visited)
+                if next_area is None:
+                    rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，四座都逛過 → 回主區",
+                         "island": area, "gesture": gesture, "loop": loop_count,
+                         "decision": "return", "visited": len(visited)})
+                    return True
+                rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
+                     "island": area, "gesture": gesture, "loop": loop_count,
+                     "decision": "switch"})
+                area = next_area
+                break
             d, px, override = route_act(act)
             img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
                       drag_len=override if override is not None else 300,
                       settle=0)
+            gesture += 1
             dwell = island_dwell_elapsed(island_started)
-            loop_count = max(0, (n - ISLAND_ENTRY_LEGS + loop_size - 1) // loop_size)
-            rec({"note": f"{LABEL[area]}島停留 {dwell:.1f}s，第{n}個手勢",
+            rec({"note": f"{LABEL[area]}島停留 {dwell:.1f}s，第{gesture}個手勢",
                  "island": area, "dwell_s": round(dwell, 3),
-                 "gesture": n, "circle": loop_count, "loop": loop_count})
-            if n <= ISLAND_ENTRY_LEGS:
-                continue
-            # Once the island minimum is satisfied, a deadline return may
-            # leave after any completed gesture; never split the in-flight swipe.
-            if dwell >= ISLAND_MIN_DWELL and time.time() >= deadline:
+                 "gesture": gesture, "circle": loop_count, "loop": loop_count})
+            # 滿 12 秒後，期限一到就在這個手勢邊界離開（不切斷正在送出的拖曳）
+            if (gesture > ISLAND_ENTRY_LEGS and dwell >= ISLAND_MIN_DWELL
+                    and time.time() >= deadline):
                 rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
-                     "island": area, "gesture": n, "decision": "return"})
+                     "island": area, "gesture": gesture, "decision": "return"})
                 return True
-            if (n - ISLAND_ENTRY_LEGS) % loop_size:
-                continue
-            if dwell < ISLAND_MIN_DWELL:
-                continue
-            next_area = choose_island(visited)
-            if next_area is None:
-                rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，四座都逛過 → 回主區",
-                     "island": area, "gesture": n, "loop": loop_count,
-                     "decision": "return", "visited": len(visited)})
-                return True
-            rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
-                 "island": area, "gesture": n, "loop": loop_count, "decision": "switch"})
-            area = next_area
-            break
         else:
             rec({"note": f"{LABEL[area]}島循環距離已縮到邊界，回主區",
                  "island": area, "decision": "return"})
