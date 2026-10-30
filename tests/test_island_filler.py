@@ -42,9 +42,8 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(actions[2:], expected)
 
     def test_all_islands_use_max_field_loop(self):
-        """四座島布局相同：外圈都是實測生怪區 + 保險，不能有哪座偷偷縮水。"""
-        w = cf.ISLAND_FIELD_W + cf.ISLAND_EDGE_MARGIN
-        h = cf.ISLAND_FIELD_H + cf.ISLAND_EDGE_MARGIN
+        """四座島布局相同：外圈都是實走定案的 ISLAND_LOOP_W × ISLAND_LOOP_H。"""
+        w, h = cf.ISLAND_LOOP_W, cf.ISLAND_LOOP_H
         for area in cf.ISLANDS:
             loop = [cf.route_act(a) for a in
                     cf.ISLAND_ROUTES[area][cf.ISLAND_ENTRY_LEGS:]]
