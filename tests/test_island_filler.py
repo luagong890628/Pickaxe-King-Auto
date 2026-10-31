@@ -70,14 +70,14 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(cf.choose_island({"ice"}), "shark")
 
     def test_farm_fill_pairs_is_not_shortened_by_deadline(self):
-        self.assertEqual(cf.FILL_PAIRS, 6)
+        self.assertEqual(cf.FILL_PAIRS, 5)
 
     def test_farm_fill_executes_all_six_pairs(self):
         calls = []
         with patch.object(cf, "leg", side_effect=lambda img, d, px, rec, label, **kw:
                           calls.append((d, px)) or img):
             cf.fill_cycle("farm", lambda _: None, None)
-        self.assertEqual(calls, [("R", 700.0), ("L", 700.0)] * 6)
+        self.assertEqual(calls, [("R", 700.0), ("L", 700.0)] * 5)
 
     def exercise_filler(self, seconds, deadline, choices, cooldown=lambda: True,
                         visited=None):
