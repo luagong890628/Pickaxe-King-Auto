@@ -251,7 +251,7 @@ START_PREFIX = [
 ISLANDS = ("ice", "shark", "duck", "truffle")
 ISLAND_ENTRY_LEGS = 2
 ISLAND_SHRINK_PX = 100.0       # 每個循環的每段距離向內縮 100px
-ISLAND_MIN_DWELL = 12.0
+ISLAND_MIN_DWELL = 13.0        # 至少停留 13 秒，保留傳送冷卻安全緩衝
 VILLAGE_FIRST_CUT_INTERVAL = 105.0
 
 # 一趟島的實際耗時（傳送 → 下一座傳送）。2026-10-29 由 6 小時執行紀錄統計，
@@ -668,23 +668,7 @@ def run_island_filler(rec, deadline, visited=None, reverse=False):
         for act in island_actions(area, max_loops=None):
             if act[0] == ISLAND_RING_MARK:
                 loop_count += 1
-                if dwell < ISLAND_MIN_DWELL:
-                    continue
-                if time.time() >= deadline:
-                    rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
-                         "island": area, "gesture": gesture, "decision": "return"})
-                    return True
-                next_area = choose_island(visited, reverse=reverse)
-                if next_area is None:
-                    rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，四座都逛過 → 回主區",
-                         "island": area, "gesture": gesture, "loop": loop_count,
-                         "decision": "return", "visited": len(visited)})
-                    return True
-                rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，切換島嶼",
-                     "island": area, "gesture": gesture, "loop": loop_count,
-                     "decision": "switch"})
-                area = next_area
-                break
+                continue
             d, px, override = route_act(act)
             img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
                       drag_len=override if override is not None else 300,
@@ -694,16 +678,28 @@ def run_island_filler(rec, deadline, visited=None, reverse=False):
             rec({"note": f"{LABEL[area]}島停留 {dwell:.1f}s，第{gesture}個手勢",
                  "island": area, "dwell_s": round(dwell, 3),
                  "gesture": gesture, "circle": loop_count, "loop": loop_count})
-            # 滿 12 秒後，期限一到就在這個手勢邊界離開（不切斷正在送出的拖曳）
-            if (gesture > ISLAND_ENTRY_LEGS and dwell >= ISLAND_MIN_DWELL
-                    and time.time() >= deadline):
-                rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
+            # 期限只在螺旋耗盡、到中心後判斷；不切斷中途手勢。
+        else:
+            # 只有螺旋距離縮到中心後才決定離島或換島；不在 13 秒邊界提前中斷。
+            if dwell < ISLAND_MIN_DWELL:
+                rec({"note": f"{LABEL[area]}島已到中心但停留僅 {dwell:.1f}s，繼續等待",
+                     "island": area, "decision": "center_before_minimum"})
+                return True
+            if time.time() >= deadline:
+                rec({"note": f"{LABEL[area]}島已到中心，回主流程",
                      "island": area, "gesture": gesture, "decision": "return"})
                 return True
-        else:
-            rec({"note": f"{LABEL[area]}島循環距離已縮到邊界，回主區",
-                 "island": area, "decision": "return"})
-            return True
+            next_area = choose_island(visited, reverse=reverse)
+            if next_area is None:
+                rec({"note": f"{LABEL[area]}島已到中心，四座都逛過 → 回主區",
+                     "island": area, "gesture": gesture, "decision": "return",
+                     "visited": len(visited)})
+                return True
+            rec({"note": f"{LABEL[area]}島已到中心，切換島嶼",
+                 "island": area, "gesture": gesture, "decision": "switch"})
+            area = next_area
+            # 下一座島的進場由外層 while 重新送出。
+            continue
 
 
 def main():

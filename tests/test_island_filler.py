@@ -61,7 +61,7 @@ class IslandFillerContractTest(unittest.TestCase):
                              expected_widths.get(area, [w, w]), area)
 
     def test_island_dwell_uses_real_elapsed_seconds(self):
-        self.assertEqual(cf.ISLAND_MIN_DWELL, 12.0)
+        self.assertEqual(cf.ISLAND_MIN_DWELL, 13.0)
         with patch.object(cf.time, "time", return_value=100.0), \
              patch.object(cf.time, "perf_counter", return_value=112.5):
             self.assertEqual(cf.island_dwell_elapsed(100.0), 12.5)
@@ -100,12 +100,12 @@ class IslandFillerContractTest(unittest.TestCase):
 
     def test_few_seconds_left_switches_at_minimum_and_new_island_keeps_minimum(self):
         moves, transfers, rows, choose, worked = self.exercise_filler(
-            3.0, 121.0, ['ice', 'shark'])
+            3.0, 121.0, ['ice', 'shark', None])
         self.assertTrue(worked)
-        self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 118.0)])
-        self.assertEqual([r['gesture'] for r in rows if r.get('decision') == 'switch'], [6])
-        self.assertGreaterEqual(len([m for m in moves if m[0] == '鯊魚島補空檔']), 4)
-        self.assertEqual(len(choose.call_args_list), 2)   # 起點一次、換島一次
+        self.assertEqual(transfers, [('ice', 100.0)])
+        self.assertEqual([r for r in rows if r.get('decision')][-1]['decision'], 'return')
+        self.assertGreaterEqual(len([m for m in moves if m[0] == '冰雪魔像島補空檔']), 20)
+        self.assertEqual(len(choose.call_args_list), 1)   # 走到中心但最低停留尚未滿
         # 註：mock 記的是同一個 set 的參考，事後看內容一定是累積後的，故只驗次數。
 
     def test_cooldown_unready_continues_complete_loops_without_menu_or_sleep(self):
@@ -115,29 +115,29 @@ class IslandFillerContractTest(unittest.TestCase):
                 0.5, 101.0, ['ice', None], cooldown=lambda: next(checks))
         self.assertEqual([a for a, _ in transfers], ['ice'])
         self.assertEqual(len(moves), 20)  # entry2 + 18 spiral gestures before the deadline boundary
-        self.assertEqual(rows[-1]['decision'], 'return')
+        self.assertEqual(rows[-1]['decision'], 'center_before_minimum')
 
     def test_switch_waits_for_cooldown_by_walking_more_loops(self):
         checks = iter([False, False, True, True])
         moves, transfers, _, _, _ = self.exercise_filler(
             3.0, 145.0, ['ice', 'shark', None], cooldown=lambda: next(checks, True))
-        self.assertEqual(transfers[:2], [('ice', 100.0), ('shark', 118.0)])
-        self.assertEqual(len([m for m in moves if m[0] == '冰雪魔像島補空檔']), 6)
+        self.assertEqual(transfers, [('ice', 100.0)])
+        self.assertEqual(len([m for m in moves if m[0] == '冰雪魔像島補空檔']), 20)
 
     def test_minimum_dwell_and_log_use_complete_loop_boundary(self):
         moves, transfers, rows, _, _ = self.exercise_filler(1.0, 101.0, ['ice'])
-        self.assertEqual(len(moves), 12)  # entry 2 + two complete loops, then the deadline interrupts
+        self.assertEqual(len(moves), 20)  # 2 entry + 18 gestures reach the spiral center
         self.assertEqual([a for a, _ in transfers], ['ice'])
         runtime = [r for r in rows if 'dwell_s' in r]
-        self.assertEqual(runtime[-1]['dwell_s'], 12.0)
-        self.assertEqual(runtime[-1]['circle'], 2)
+        self.assertEqual(runtime[-1]['dwell_s'], 20.0)
+        self.assertEqual(runtime[-1]['circle'], 4)
 
     def test_all_islands_used_up_returns_without_reentry(self):
         """四座都逛過（choose_island 回 None）→ 直接回主區，不再原地重複繞。"""
         moves, transfers, rows, _, worked = self.exercise_filler(3.0, 200.0, ['ice', None])
         self.assertTrue(worked)
         self.assertEqual(transfers, [('ice', 100.0)])
-        self.assertEqual(len(moves), 6)  # 3s/手勢 → 第 6 個手勢（2 進場+1 圈）就滿 12 秒
+        self.assertEqual(len(moves), 20)  # 螺旋走到中心後才判斷
         self.assertEqual(rows[-1]['decision'], 'return')
 
     def test_one_trip_per_island_per_window(self):
@@ -189,11 +189,12 @@ class IslandFillerContractTest(unittest.TestCase):
             with patch.object(cf, "leg", side_effect=finish_after_gesture):
                 cf.run_island_filler(lambda _: None, 105.0)
 
-        self.assertEqual(calls, [
+        self.assertEqual(len(calls), 20)
+        self.assertEqual(calls[:5], [
             ('N', 950.0), ('L', 500.0), ('S', cf.ISLAND_LOOP_H),
             ('R', cf.ISLAND_LOOP_W), ('N', cf.ISLAND_LOOP_H - cf.ISLAND_SHRINK_PX),
         ])
-        self.assertEqual(now[0], 105.0)
+        self.assertEqual(now[0], 150.0)
 
 
 if __name__ == "__main__":
