@@ -284,9 +284,9 @@ ISLAND_ROUTES = {
     "ice": [("N", 950.0, 300), ("L", 500.0, 300),
             ("S", ISLAND_LOOP_H, 300), ("R", ISLAND_LOOP_W, 300),
             ("N", ISLAND_LOOP_H, 300), ("L", ISLAND_LOOP_W, 300)],      # 西北角進：南→東→北→西
-    "shark": [("N", 950.0, 300), ("L", 300.0, 300),
+    "shark": [("N", 950.0, 300), ("L", 500.0, 300),
               ("S", ISLAND_LOOP_H, 300), ("R", ISLAND_LOOP_W, 300),
-              ("N", ISLAND_LOOP_H, 300), ("L", ISLAND_LOOP_W, 300)],    # 西北角進：南→東→北→西
+              ("N", ISLAND_LOOP_H, 300), ("L", ISLAND_LOOP_W, 300)],    # 先照冰雪島進場與外圈
     "duck": [("R", 600.0, 300), ("N", 200.0, 300),
              ("L", ISLAND_LOOP_W, 300), ("S", ISLAND_LOOP_H, 300),
              ("R", ISLAND_LOOP_W, 300), ("N", ISLAND_LOOP_H, 300)],     # 東北角進：西→南→東→北
