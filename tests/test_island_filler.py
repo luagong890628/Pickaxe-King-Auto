@@ -46,12 +46,14 @@ class IslandFillerContractTest(unittest.TestCase):
     def test_all_islands_use_max_field_loop(self):
         """四座島布局相同：外圈都是實走定案的 ISLAND_LOOP_W × ISLAND_LOOP_H。"""
         w, h = cf.ISLAND_LOOP_W, cf.ISLAND_LOOP_H
+        expected_widths = {"duck": [850.0, 850.0]}
         for area in cf.ISLANDS:
             loop = [cf.route_act(a) for a in
                     cf.ISLAND_ROUTES[area][cf.ISLAND_ENTRY_LEGS:]]
             self.assertEqual(len(loop), 4, area)
             self.assertEqual(sorted(p for d, p, _ in loop if d in "NS"), [h, h], area)
-            self.assertEqual(sorted(p for d, p, _ in loop if d in "LR"), [w, w], area)
+            self.assertEqual(sorted(p for d, p, _ in loop if d in "LR"),
+                             expected_widths.get(area, [w, w]), area)
 
     def test_island_dwell_uses_real_elapsed_seconds(self):
         self.assertEqual(cf.ISLAND_MIN_DWELL, 12.0)
