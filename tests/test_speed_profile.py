@@ -157,14 +157,21 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.route_settle('village', 1), 0.0)
         self.assertEqual(cf.route_settle('village', 18), 0.0)
 
-    def test_slowed_legs_use_drag_120(self):
-        # 2026-10-26：原本靠停頓補刀的段，改成降速（拖 120）取代停頓
-        for n in (3, 5, 7, 12, 14, 15, 17):
-            self.assertEqual(cf.route_drag('village', n), 120)
-            self.assertEqual(cf.route_settle('village', n), 0.0)
-        # 其餘林內段維持 200
-        for n in (4, 6, 8, 9, 10, 11, 13, 16, 18):
+    def test_slowed_legs_use_slow_drag(self):
+        # 2026-10-26：原本靠停頓補刀的段，改成降速取代停頓
+        # 2026-10-31：慢段由拖 120 放寬到拖 150（278px/秒），林內一般段同時 150 → 180
+        for n in (3, 5, 7, 11, 14, 15, 17):
+            self.assertEqual(cf.route_drag('village', n), cf.SLOW_DRAG)
+        # 其餘林內段用該區預設（FOREST_DRAG）
+        for n in (4, 6, 8, 9, 10, 12, 13, 16, 18):
             self.assertEqual(cf.route_drag('village', n), cf.FOREST_DRAG)
+
+    def test_leg3_pauses_after_moving(self):
+        # 2026-10-31：第 3 段中後段的樹在攻擊範圍內卻來不及砍完 → 走完停 0.5 秒補刀
+        self.assertEqual(cf.route_settle('village', 3), 0.5)
+        # 其餘慢段仍然只靠降速、不停頓
+        for n in (5, 7, 11, 14, 15, 17):
+            self.assertEqual(cf.route_settle('village', n), 0.0)
 
     def test_start_shares_village_tail_pauses(self):
         # 起始之地第 5 段起＝小村莊第 4 段起 → 停頓點必須一致（段號平移 1：前段多了 REST）
@@ -184,9 +191,9 @@ class PerLegSettleTest(unittest.TestCase):
         self.assertEqual(cf.ROUTES['start'][4:], cf.VILLAGE[3:])
 
     def test_start_after_rest_is_fast_then_slow(self):
-        # 休息完先走一段快的（拖 ENTRY_WEST_DRAG）、再走一段慢的（拖 120，與小村莊第 3 段同步）
+        # 休息完先走一段快的（拖 ENTRY_WEST_DRAG）、再走一段慢的（拖 SLOW_DRAG，與小村莊第 3 段同步）
         self.assertEqual(cf.route_drag('start', 3), cf.ENTRY_WEST_DRAG)
-        self.assertEqual(cf.route_drag('start', 4), 120)
+        self.assertEqual(cf.route_drag('start', 4), cf.SLOW_DRAG)
         self.assertEqual(cf.route_drag('start', 4), cf.route_drag('village', 3))
         self.assertGreater(cf.speed_of(cf.ENTRY_WEST_DRAG), cf.speed_of(cf.FOREST_DRAG))
         # 兩段合計仍是原本的西 450，終點不變

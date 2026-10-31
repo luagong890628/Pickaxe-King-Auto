@@ -41,10 +41,11 @@ class RouteToolsTest(unittest.TestCase):
             self.assertEqual(fill.call_args.args[0], 'farm')
 
     def test_run_leg_without_settle_follows_route_setting(self):
-        # 沒給 --settle 時要照 SETTLE_LEGS：目前路線沒有停頓段 → 完全不停
+        # 沒給 --settle 時要照 SETTLE_LEGS：目前只有第 3 段停 0.5 秒（補漏砍）
+        self.assertEqual(cf.route_settle('village', 3), 0.5)
         self.assertEqual(
             self._run_leg_sleeps(['village', '1', '2', '3', '--no-teleport', '--no-measure']),
-            [])
+            [0.5])
 
     def test_run_leg_honours_configured_dwell(self):
         # 把第 3 段設成要停 0.5，不給 --settle 時就只停那一次
