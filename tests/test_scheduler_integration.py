@@ -64,7 +64,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, visited=None):
+            def fill(rec, deadline, visited=None, reverse=False):
                 clock.sleep(20.0)
                 return False
             return fill
@@ -82,7 +82,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, visited=None):
+            def fill(rec, deadline, visited=None, reverse=False):
                 clock.sleep(min(30.0, max(0.1, deadline - clock.now)))
                 return False
             return fill
@@ -98,7 +98,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
             return (clock.now if area == 'village' else None), None
 
         def filler(clock):
-            def fill(rec, deadline, visited=None):
+            def fill(rec, deadline, visited=None, reverse=False):
                 return False
             return fill
 
@@ -116,7 +116,7 @@ class SchedulerIntegrationTest(unittest.TestCase):
         seen = []
 
         def filler(clock):
-            def fill(rec, deadline, visited=None):
+            def fill(rec, deadline, visited=None, reverse=False):
                 seen.append(set(visited))          # 記下「進來時」的狀態
                 visited.add('ice')                 # 假裝剛逛完冰雪島
                 clock.sleep(min(20.0, max(0.1, deadline - clock.now)))

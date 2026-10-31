@@ -14,6 +14,11 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(cf.choose_island({"duck"}), "truffle")
         self.assertEqual(cf.choose_island({"truffle"}), "ice")     # 繞回第一座
 
+    def test_reverse_window_order(self):
+        self.assertEqual(cf.choose_island(reverse=True), "truffle")
+        self.assertEqual(cf.choose_island({"truffle"}, reverse=True), "duck")
+        self.assertEqual(cf.choose_island({"truffle", "duck"}, reverse=True), "shark")
+
     def test_selection_ignores_respawn_time(self):
         """不把重生時間寫成門檻：就算剛剛才去過，下一座照樣是固定順序的下一座。"""
         self.assertEqual(cf.REFRESH["ice"], 0.0)

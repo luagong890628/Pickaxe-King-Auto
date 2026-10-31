@@ -334,25 +334,20 @@ def _overdue(area, now, last):
     return (now - last.get(area, float("-inf"))) / r
 
 
-def choose_island(excluded=None):
-    """固定順序：冰雪 → 鯊魚 → 鴨子 → 松露（排除已去過的）。
-
-    使用者 2026-10-29：不抽選、也不看重生時間（那是大約值，寫死成門檻反而擋掉能採的島）。
-    做法是「從被排除那些的下一座往後找」，所以順序固定、不會原地重複；
-    排除集合就是「這個補空檔窗口已經逛過的島」，全部去過就回傳 None（＝回主區等樹）。
-    路線還空著的島自動跳過。
-    """
+def choose_island(excluded=None, reverse=False):
+    """依窗口方向挑下一座未走過的島，排除集合內的島。"""
     excluded = set() if excluded is None else set(excluded)
-    valid = [a for a in ISLANDS if ROUTES.get(a)]
+    order = ISLANDS[::-1] if reverse else ISLANDS
+    valid = [a for a in order if ROUTES.get(a)]
     if not valid:
         return None
     start = 0
-    for a in ISLANDS:                      # 從被排除那座（＝剛離開的）的下一座開始
-        if a in excluded:
-            start = ISLANDS.index(a) + 1
-    for i in range(len(ISLANDS)):
-        area = ISLANDS[(start + i) % len(ISLANDS)]
-        if area not in excluded and area in valid:
+    for i, area in enumerate(order):
+        if area in excluded:
+            start = i + 1
+    for i in range(len(order)):
+        area = order[(start + i) % len(order)]
+        if area not in excluded and ROUTES.get(area):
             return area
     return None
 
@@ -645,7 +640,7 @@ def run_area(area, rec, no_pearl=False):
     return first_cut, img
 
 
-def run_island_filler(rec, deadline, visited=None):
+def run_island_filler(rec, deadline, visited=None, reverse=False):
     """Fill until deadline, yielding only after a complete loop and >=12s dwell.
 
     ``visited`` 由呼叫端持有、跨多次呼叫累積：**同一個補空檔窗口內每座島只去一次**。
@@ -658,7 +653,7 @@ def run_island_filler(rec, deadline, visited=None):
     stop here without an unnecessary return trip.
     """
     visited = set() if visited is None else visited
-    area = choose_island(visited)
+    area = choose_island(visited, reverse=reverse) if reverse else choose_island(visited)
     if area is None:
         return False
     while True:
@@ -679,7 +674,7 @@ def run_island_filler(rec, deadline, visited=None):
                     rec({"note": f"{LABEL[area]}島補空檔結束（期限已到，傳送由 teleport 安全等待）",
                          "island": area, "gesture": gesture, "decision": "return"})
                     return True
-                next_area = choose_island(visited)
+                next_area = choose_island(visited, reverse=reverse)
                 if next_area is None:
                     rec({"note": f"{LABEL[area]}島完成 {loop_count} 圈，四座都逛過 → 回主區",
                          "island": area, "gesture": gesture, "loop": loop_count,
@@ -848,6 +843,7 @@ def main():
     steps = 0
     last_first_cut = None
     filler_visited = set()   # 這一輪補空檔已經逛過的島（小村莊重新採集就清空）
+    island_reverse = False   # 每個補空檔窗口反轉一次：正向／反向蛇形輪替
 
     try:
         while time.time() < deadline and (step_limit is None or steps < step_limit):
@@ -858,7 +854,8 @@ def main():
                     filler_deadline = min(last_first_cut + VILLAGE_FIRST_CUT_INTERVAL,
                                           deadline)
                     if now < filler_deadline:
-                        did_work = run_island_filler(rec, filler_deadline, filler_visited)
+                        did_work = run_island_filler(rec, filler_deadline, filler_visited,
+                                                     reverse=island_reverse)
                         if did_work:
                             continue
                         # 沒有可去的島（四座都逛過）→ 直接等主區刷新，不要空轉。
@@ -884,6 +881,8 @@ def main():
 
             first_cut, _ = run_area(area, rec, args.no_pearl)
             if first_cut is not None:
+                if last_first_cut is not None:
+                    island_reverse = not island_reverse
                 last_first_cut = first_cut
                 filler_visited.clear()      # 小村莊重新採集 → 新的補空檔窗口
 
