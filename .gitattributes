@@ -1,0 +1,15 @@
+# 換行符規則（2026-10-31）
+# 倉庫一律存 LF，避免不同人的 core.autocrlf 設定造成整檔 diff。
+# Windows 批次檔例外：cmd.exe 對 CRLF 比較保險，checkout 時轉回 CRLF。
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# 資料檔不做換行正規化：tune_log.jsonl 由程式以文字模式附加寫入，
+# 每次寫入都是 CRLF，正規化會讓它永遠顯示為已修改。
+*.jsonl -text
+
+# 二進位檔不轉換、不做 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pyc binary
