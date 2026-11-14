@@ -25,9 +25,9 @@ MENU_SCROLL_TO = (720, 2250)
 MENU_SCROLL_MS = 300
 # ---- 傳送選單座標 ----
 # 1440×3120 實機選單歸頂後的固定點；2026-11-14 八個新版標記已由使用者確認。
-# 標記確認不等同實際傳送驗收；monster_a 只保存座標，尚未加入路線或排程。
+# 標記確認不等同實際傳送驗收；怪物島 A 已授權加入補空檔排程。
 TILE = {"farm": (350, 1133), "village": (350, 2190), "start": (720, 2190),
-        "monster_a": (350, 793),  # 怪物島 A（尚未啟用）
+        "monster_a": (350, 793),  # 怪物島 A
         "ice": (1066, 1480),      # 冰雪魔像島
         "shark": (711, 1480),     # 鯊魚島
         "duck": (1066, 1830),     # 鴨子島
@@ -41,7 +41,7 @@ MAGNET_TAP = (1330, 1855)                               # 休息後點一次；�
 TELEPORT_COOLDOWN = 12.0
 # All island routes keep one second of slack: the game cooldown is 12s,
 # while a completed island loop can land close to that boundary.
-TELEPORT_COOLDOWN_MARGIN_BY_SOURCE = {"ice": 1.0, "shark": 1.0, "duck": 1.0, "truffle": 1.0}
+TELEPORT_COOLDOWN_MARGIN_BY_SOURCE = {"ice": 1.0, "shark": 1.0, "duck": 1.0, "truffle": 1.0, "monster_a": 1.0}
 _last_teleport = 0.0
 _last_teleport_area = None
 
@@ -249,11 +249,10 @@ START_PREFIX = [
 ]
 
 # ---- 島嶼：多餘時間（主三區都在刷新）才去 ----
-# 使用者 2026-10-29：**固定順序** 冰雪魔像 → 鯊魚 → 鴨子 → 松露，排除剛離開的那座。
-# 不要用權重抽選，也不要把重生時間寫成門檻（重生只是大約值：冰雪實測 108 秒，
-# 四座島之後還會再降）。同一個補空檔窗口內每座島只去一次，逛完四座就回主區等樹。
+# 固定順序：冰雪魔像 → 鯊魚 → 鴨子 → 松露 → 怪物島 A；下一窗口反向。
+# 不用權重抽選或重生時間門檻；同一窗口每座島只去一次，全部走過就回主區等樹。
 # 路線還空著的島排程器會自動跳過（不會傳送過去發呆）。
-ISLANDS = ("ice", "shark", "duck", "truffle")
+ISLANDS = ("ice", "shark", "duck", "truffle", "monster_a")
 ISLAND_ENTRY_LEGS = 2
 ISLAND_SHRINK_PX = 100.0       # 每個循環的每段距離向內縮 100px
 ISLAND_MIN_DWELL = 13.0        # 至少停留 13 秒，保留傳送冷卻安全緩衝
@@ -267,7 +266,7 @@ VILLAGE_FIRST_CUT_INTERVAL = 105.0
 ISLAND_TRIP_SECONDS = 18.0
 
 ISLAND_LABEL = {"ice": "冰雪魔像島", "shark": "鯊魚島",
-                "duck": "鴨子島", "truffle": "松露島"}
+                "duck": "鴨子島", "truffle": "松露島", "monster_a": "怪物島A"}
 
 # 生怪區實測尺寸（東 × 南）。2026-10-29 冰雪魔像島：
 #   A 西北、B 東北 = 東 1000；A → D = 南 844。
@@ -283,6 +282,10 @@ ISLAND_LOOP_W = 1000.0
 ISLAND_LOOP_H = 850.0
 
 ISLAND_ROUTES = {
+    # 怪物島 A：北 550 已目視驗收；其餘沿用冰雪島候選，整條新版尚未實跑。
+    "monster_a": [("N", 550.0, 300), ("L", 500.0, 300),
+                  ("S", ISLAND_LOOP_H, 300), ("R", ISLAND_LOOP_W, 300),
+                  ("N", ISLAND_LOOP_H, 300), ("L", ISLAND_LOOP_W, 300)],
     # 前 2 段＝進場（只走一次，把角色帶到生怪區的一個角落）；
     # 後 4 段＝一個完整外圈，之後每個循環由 ISLAND_SHRINK_PX 往內縮。
     # 四座外圈完全一樣（ISLAND_LOOP_W × ISLAND_LOOP_H），差別只在進場從哪個方向走進去。

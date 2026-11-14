@@ -35,10 +35,16 @@ class TeleportTest(unittest.TestCase):
                     ('swipe', (720, 850, 720, 2250, 300)), ('wait', cf.TELEPORT_WAIT),
                     ('tap', tile), ('wait', cf.TELEPORT_WAIT)])
 
-    def test_monster_a_coordinate_is_saved_without_enabling_route(self):
+    def test_monster_a_is_enabled_as_filler_with_independent_route(self):
         self.assertEqual(cf.TILE['monster_a'], (350, 793))
-        self.assertNotIn('monster_a', cf.ROUTES)
-        self.assertNotIn('monster_a', cf.ISLANDS)
+        self.assertEqual(cf.ISLANDS, ('ice', 'shark', 'duck', 'truffle', 'monster_a'))
+        self.assertEqual(cf.ROUTES['monster_a'][0], ('N', 550.0, 300))
+        self.assertEqual(cf.ROUTES['monster_a'][1:], cf.ROUTES['ice'][1:])
+        self.assertIsNot(cf.ROUTES['monster_a'], cf.ROUTES['ice'])
+        self.assertEqual(cf.REFRESH['monster_a'], 0.0)
+        actions = list(cf.island_actions('monster_a', max_loops=None))
+        self.assertEqual(actions[0], ('N', 550.0, 300))
+        self.assertEqual(actions[1:], list(cf.island_actions('ice', max_loops=None))[1:])
 
     def test_gesture_wait_is_0_3_seconds(self):
         # 2026-10-26 使用者指示 0.5 → 0.3（三個手勢都改）

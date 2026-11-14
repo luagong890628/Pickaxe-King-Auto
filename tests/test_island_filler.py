@@ -12,10 +12,12 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(cf.choose_island({"ice"}), "shark")
         self.assertEqual(cf.choose_island({"shark"}), "duck")
         self.assertEqual(cf.choose_island({"duck"}), "truffle")
-        self.assertEqual(cf.choose_island({"truffle"}), "ice")     # 繞回第一座
+        self.assertEqual(cf.choose_island({"truffle"}), "monster_a")
+        self.assertEqual(cf.choose_island({"monster_a"}), "ice")     # 繞回第一座
 
     def test_reverse_window_order(self):
-        self.assertEqual(cf.choose_island(reverse=True), "truffle")
+        self.assertEqual(cf.choose_island(reverse=True), "monster_a")
+        self.assertEqual(cf.choose_island({"monster_a"}, reverse=True), "truffle")
         self.assertEqual(cf.choose_island({"truffle"}, reverse=True), "duck")
         self.assertEqual(cf.choose_island({"truffle", "duck"}, reverse=True), "shark")
 
@@ -28,7 +30,7 @@ class IslandFillerContractTest(unittest.TestCase):
     def test_skips_islands_without_route(self):
         with patch.dict(cf.ROUTES, {"duck": []}, clear=False):
             self.assertEqual(cf.choose_island({"shark"}), "truffle")
-            self.assertEqual(cf.choose_island({"truffle"}), "ice")
+            self.assertEqual(cf.choose_island({"truffle"}), "monster_a")
 
     def test_returns_none_when_no_island_has_route(self):
         empty = {a: [] for a in cf.ISLANDS}
