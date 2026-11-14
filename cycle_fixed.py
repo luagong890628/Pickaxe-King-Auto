@@ -24,15 +24,16 @@ MENU_SCROLL_FROM = (720, 850)
 MENU_SCROLL_TO = (720, 2250)
 MENU_SCROLL_MS = 300
 # ---- 傳送選單座標 ----
-# 2026-10-26 從實機選單截圖換算（畫面 1440×3120，截圖 500×1080 → ×2.88／×2.889）。
-# 已實測驗證：ice (1066,1017) 確實傳到冰雪魔像島（雪地＋白色魔像）。
-TILE = {"farm": (350, 800), "village": (350, 1810), "start": (720, 1810),
-        # 四個島在選單右上／右中兩排（島嶼布局相同，只有傳送落點不同）
-        "ice": (1066, 1077),      # 冰雪魔像島（選單右上）
-        "shark": (711, 1077),     # 鯊魚島（選單中上）
-        "duck": (1066, 1438),     # 鴨子島（選單右中）
-        "truffle": (711, 1438)}   # 松露島（選單中中）
+# 1440×3120 實機選單歸頂後的固定點；2026-11-14 八個新版標記已由使用者確認。
+# 標記確認不等同實際傳送驗收；monster_a 只保存座標，尚未加入路線或排程。
+TILE = {"farm": (350, 1133), "village": (350, 2190), "start": (720, 2190),
+        "monster_a": (350, 793),  # 怪物島 A（尚未啟用）
+        "ice": (1066, 1480),      # 冰雪魔像島
+        "shark": (711, 1480),     # 鯊魚島
+        "duck": (1066, 1830),     # 鴨子島
+        "truffle": (711, 1830)}   # 松露島
 REST_TAP = (721, 1839)                                  # 帳篷休息對話框中心
+MAGNET_TAP = (1330, 1855)                               # 休息後點一次；使用者已確認標記
 
 # 傳送石冷卻（使用者 2026-10-26 確認 12 秒）：冷卻中再點不會傳送，選單會留在畫面上，
 # 之後的手勢就打在選單上而不是搖桿。實測連續傳送間隔 6 秒時，後續滑動位移量到 0px。
@@ -552,6 +553,8 @@ def rest(rec, img, label):
     adb.tap(*REST_TAP)
     time.sleep(REST_WAIT)
     rec({"note": f"{label} 休息（點固定座標）"})
+    adb.tap(*MAGNET_TAP)
+    rec({"note": f"{label} 磁鐵（點固定座標）"})
     return shot() if MEASURE else img      # 不量位移就不截圖（省 0.76s）
 
 
@@ -747,7 +750,7 @@ def main():
                 continue
             for i, act in enumerate(ROUTES[area], 1):
                 if act[0] == "REST":
-                    print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）")
+                    print(f"  {i}. 休息（點 {REST_TAP}，等 {REST_WAIT}s）→ 點磁鐵 {MAGNET_TAP}")
                     continue
                 d, px, override = route_act(act)
                 drag = route_drag(area, i)

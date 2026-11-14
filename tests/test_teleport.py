@@ -25,13 +25,20 @@ class TeleportTest(unittest.TestCase):
         cf._last_teleport_area = None
 
     def test_top_menu_gesture_wait_and_confirmed_destinations(self):
-        for area, tile in [('farm', (350, 800)), ('village', (350, 1810)), ('start', (720, 1810))]:
+        for area, tile in [('farm', (350, 1133)), ('village', (350, 2190)), ('start', (720, 2190)),
+                           ('ice', (1066, 1480)), ('shark', (711, 1480)),
+                           ('duck', (1066, 1830)), ('truffle', (711, 1830))]:
             with self.subTest(area=area):
                 cf._last_teleport = 0.0
                 events = _run(area, now=1000.0)
                 self.assertEqual(events, [('tap', cf.HEART), ('wait', cf.TELEPORT_WAIT),
                     ('swipe', (720, 850, 720, 2250, 300)), ('wait', cf.TELEPORT_WAIT),
                     ('tap', tile), ('wait', cf.TELEPORT_WAIT)])
+
+    def test_monster_a_coordinate_is_saved_without_enabling_route(self):
+        self.assertEqual(cf.TILE['monster_a'], (350, 793))
+        self.assertNotIn('monster_a', cf.ROUTES)
+        self.assertNotIn('monster_a', cf.ISLANDS)
 
     def test_gesture_wait_is_0_3_seconds(self):
         # 2026-10-26 使用者指示 0.5 → 0.3（三個手勢都改）
