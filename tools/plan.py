@@ -27,9 +27,8 @@ def area_seconds(area):
         t += cf.hold_ms(px, cf.route_drag(area, i)) / 1000 + OVERHEAD
     if area in cf.FILL_LEGS:
         for _ in range(cf.FILL_PAIRS):
-            for n in cf.FILL_LEGS[area]:
-                d, px, _ = cf.route_act(cf.ROUTES[area][n - 1])
-                t += cf.hold_ms(px, cf.route_drag(area, n)) / 1000 + OVERHEAD
+            for d, px in cf.FILL_ROUTE[area]:
+                t += cf.hold_ms(px, cf.FARM_DRAG) / 1000 + OVERHEAD
     return t
 
 

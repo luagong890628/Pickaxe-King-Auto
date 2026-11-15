@@ -37,20 +37,19 @@ class SpeedProfileTest(unittest.TestCase):
         expected = [(a, i, act) for a in ('village', 'start', 'farm')
                     for i, act in enumerate(cf.ROUTES[a], 1) if act[0] != 'REST']
         # 農場走完固定路線後，再補固定組數的 3、4 段來回（同一組速度、不停頓）
-        expected += [('farm', n, cf.ROUTES['farm'][n - 1])
-                     for _ in range(cf.FILL_PAIRS) for n in cf.FILL_LEGS['farm']]
+        expected += [('farm', n, act) for _ in range(cf.FILL_PAIRS)
+                     for n, act in enumerate(cf.FILL_ROUTE['farm'], 3)]
         self.assertEqual(len(calls), len(expected))
         for (d, px, kw), (area, i, act) in zip(calls, expected):
             self.assertEqual((d, px), cf.route_act(act)[:2])
-            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), cf.route_drag(area, i))
+            self.assertEqual(kw.get('drag_len', cf.DRAG_LEN), (cf.FARM_DRAG if area == 'farm' and i >= 3 else cf.route_drag(area, i)))
             self.assertEqual(kw['settle'], cf.route_settle(area, i))
 
     def test_farm_route_distances_and_per_leg_drag(self):
         self.assertEqual(cf.ROUTES['farm'],
-                         [('N', 600.0), ('L', 350.0), ('R', 700.0), ('L', 700.0)])
-        # 第 1 步維持進場速度；西 350、東 700、西 700 都用 FARM_DRAG（現與林內同值 160）
-        self.assertEqual([cf.route_drag('farm', n) for n in (1, 2, 3, 4)],
-                         [cf.ENTRY_DRAG, cf.FARM_DRAG, cf.FARM_DRAG, cf.FARM_DRAG])
+                         [('N', 600.0), ('L', 350.0)])
+        self.assertEqual([cf.route_drag('farm', n) for n in (1, 2)],
+                         [cf.ENTRY_DRAG, cf.FARM_DRAG])
 
     def test_farm_fill_repeats_legs_3_4_by_fixed_pairs(self):
         calls = []

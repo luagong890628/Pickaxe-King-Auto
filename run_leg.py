@@ -89,7 +89,7 @@ def main():
     ap.add_argument("--force", action="store_true", help="即使前景不是遊戲也照跑")
     ap.add_argument("--timing", action="store_true", help="量每段按下的時間與段間間隔（秒）")
     ap.add_argument("--fill", action="store_true",
-                    help="走完路線後照 FILL_LEGS 再走 FILL_PAIRS 組補時（等同正式程式的農場補時）")
+                    help="走完路線後照 FILL_LEGS 再走 FILL_PAIRS 組採收循環（等同正式程式）")
     ap.add_argument("--pairs", type=int, default=None,
                     help="搭配 --fill：走幾組來回（不給＝cycle_fixed.FILL_PAIRS；測路線時用）")
     ap.add_argument("--no-measure", action="store_true",
@@ -199,7 +199,7 @@ def main():
             cv2.imwrite(str(save_dir / f"leg{leg_no:02d}_after.jpg"), small)
     if args.fill and not args.walk and args.area in cf.FILL_LEGS:
         pairs = cf.FILL_PAIRS if args.pairs is None else args.pairs
-        print(f"補時：{pairs} 組 第 {cf.FILL_LEGS[args.area]} 段來回", flush=True)
+        print(f"正式採收：{pairs} 組 第 {cf.FILL_LEGS[args.area]} 段來回", flush=True)
         img = cf.fill_cycle(args.area, rec_plain, img, pairs=pairs)
     if save_dir is not None:
         print(f"畫面存到 {save_dir}")

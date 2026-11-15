@@ -27,7 +27,7 @@ class RouteToolsTest(unittest.TestCase):
     def test_run_leg_fill_walks_the_padding_pairs(self):
         # 農場的補時來回不在 ROUTES 裡，--fill 才會走（等同正式程式的 fill_cycle）
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch('sys.argv', ['run_leg.py', 'farm', '1', '2', '3', '4',
+            stack.enter_context(patch('sys.argv', ['run_leg.py', 'farm', '1', '2',
                                                    '--no-teleport', '--no-measure', '--fill']))
             stack.enter_context(patch.object(cf, 'MEASURE', False))
             stack.enter_context(patch.object(cf.adb, 'current_app', return_value='pickaxeking'))

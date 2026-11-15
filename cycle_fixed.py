@@ -128,26 +128,10 @@ MEASURE_TEMPLATE = False   # True＝量測一律走範本比對（慢 0.8s/段�
 DIRS = {"N": (0, -1), "S": (0, 1), "L": (-1, 0), "R": (1, 0)}
 NAMES = {"N": "北", "S": "南", "L": "西", "R": "東"}
 
-# ---- 補時：農場走到定位（1、2）與固定 3、4 段後，再多砍固定組數的來回 ----
-# 輪次基準＝小村莊第 2 步（第一刀）。
-# 2026-10-23 實測（舊速度，無補時）：輪首 → 下一輪輪首 83.1 秒；每組 3→4 約 3.61 秒。
-# 2026-10-26 重標速度後（新表）：**8 組只有 84 秒**（實測），低於樹重生的 100 秒 → 會漏砍。
-#   每組 3→4（東 700、西 700，拖 300／552px/秒）現在只要 2.54 秒。
-#   要回到 115～120 秒約需 19 組（84 + 11 組 × 2.8 ≈ 115 秒）。
-#   使用者 2026-10-26 指示「補時先不動」→ 維持 8 組，先觀察實際漏砍情況再決定。
-#
-# ⚠️ 但 `SETTLE=2.0` 之後，上面這套「靠補時把輪次撐到 100 秒」的算法**已經作廢**：
-#   停頓本身就把輪次撐起來了。以拖 200 + 停 2 秒估算（移動段 55 段）：
-#     小村莊 12.2s 移動 + 18×2s 停頓 = 51.5s
-#     起始之地 11.8s + 17×2s          = 50.8s
-#     自由農場A 24.1s + 20×2s（含 8 組補時）= 67.7s   → 一輪約 176s
-#   而**補時全關（FILL_PAIRS=0）一輪仍有 121 秒**，已經 >100 秒 → 補時可能整批不需要。
-#   停頓＝原地砍樹，補時來回＝純移動，同樣的秒數停頓更有價值 → 之後若要瘦身優先砍補時。
-# 純開環固定組數：不看時間、不判斷樹重生；要調週期就改 FILL_PAIRS。
-FILL_LEGS = {"farm": (3, 4)}   # 補時重複的段（3→4→3→4…）
-FILL_PAIRS = 5                 # 正式採收：5 組 3→4 來回
-# 農場正式採收為 5 組 3→4 來回；作物刷新 4 分鐘，
-# 不因村莊樹到期而縮短完整農場流程。
+# ---- 自由農場 A：進場後執行固定組數採收循環，不是補時間 ----
+FILL_LEGS = {"farm": (3, 4)}   # 每組採收循環的邏輯段號：東 700 → 西 700
+FILL_PAIRS = 4                 # 正式採收：4 組循環（不含進場兩步）
+FILL_ROUTE = {"farm": (("R", 700.0), ("L", 700.0))}
 
 # ---- 里程模型：距離 → 按住時間（由 SPEED_TABLE 換算） ----
 # 同場兩次實測（2026-10-21，run_leg.py village 1 2 --template）：
@@ -306,8 +290,8 @@ ISLAND_ROUTES = {
 ROUTES = {
     "village": VILLAGE,
     "start": START_PREFIX + VILLAGE[3:],
-    "farm": [("N", 600.0), ("L", 350.0), ("R", 700.0), ("L", 700.0)],
-    # 自由農場A：北進場 600 → 西 350 → 東 700 → 西 700（3、4 可來回重複）
+    "farm": [("N", 600.0), ("L", 350.0)],
+    # 自由農場A：北 600 → 西 350 進場，採作物由 fill_cycle 執行。
     **ISLAND_ROUTES,
 }
 LABEL = {"village": "小村莊", "start": "起始之地", "farm": "自由農場A", **ISLAND_LABEL}
@@ -591,13 +575,12 @@ def leg(img, d, px, rec, label, drag_len=None, settle=None):
 
 
 def fill_cycle(area, rec, img, pairs=None):
-    """固定組數來回（3→4），純開環：不看時間、不判斷樹重生。"""
-    legs = FILL_LEGS[area]
+    """執行固定組數的正式採收循環；FILL_PAIRS 不代表額外補時。"""
+    legs = FILL_ROUTE[area]
     for _ in range(FILL_PAIRS if pairs is None else pairs):
-        for n in legs:
-            d, px, _ = route_act(ROUTES[area][n - 1])
-            img = leg(img, d, px, rec, f"{LABEL[area]}補時{n}",
-                      drag_len=route_drag(area, n), settle=route_settle(area, n))
+        for d, px in legs:
+            img = leg(img, d, px, rec, f"{LABEL[area]}採收循環",
+                      drag_len=FARM_DRAG, settle=0)
     return img
 
 
@@ -778,8 +761,7 @@ def main():
                 dwell = f"／停 {s_:g}s" if s_ else ""
                 print(f"  {i}. {NAMES[d]} {px:.0f}px → 拖 {drag:g}px／按住 {hold_ms(px, drag)}ms{tag}{dwell}")
             if area in FILL_LEGS:
-                print(f"  補時：再多 {FILL_PAIRS} 組第 "
-                      f"{'、'.join(str(n) for n in FILL_LEGS[area])} 段來回（固定組數，不看時間）")
+                print(f"  正式採收：{FILL_PAIRS} 組東 700 → 西 700（不含進場）")
         print(f"珍珠：往西 {PEARL_WEST:.0f} → 點 {REST_TAP}（等 {PEARL_WAIT:g}s）→ 往東 {PEARL_EAST:.0f}"
               f"（拖 {PEARL_DRAG}px → {speed_of(PEARL_DRAG):.1f}px/秒，"
               f"冷卻 {PEARL_COOLDOWN/60:.0f} 分鐘；第一輪一定拿）")

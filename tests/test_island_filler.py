@@ -81,14 +81,24 @@ class IslandFillerContractTest(unittest.TestCase):
         self.assertEqual(cf.choose_island({"ice"}), "shark")
 
     def test_farm_fill_pairs_is_not_shortened_by_deadline(self):
-        self.assertEqual(cf.FILL_PAIRS, 5)
+        self.assertEqual(cf.FILL_PAIRS, 4)
 
-    def test_farm_fill_executes_all_six_pairs(self):
+    def test_farm_fill_executes_four_harvest_pairs(self):
         calls = []
         with patch.object(cf, "leg", side_effect=lambda img, d, px, rec, label, **kw:
                           calls.append((d, px)) or img):
             cf.fill_cycle("farm", lambda _: None, None)
-        self.assertEqual(calls, [("R", 700.0), ("L", 700.0)] * 5)
+        self.assertEqual(calls, [("R", 700.0), ("L", 700.0)] * 4)
+
+    def test_farm_complete_area_is_entry_plus_exactly_four_pairs(self):
+        calls = []
+        with (patch.object(cf, 'teleport'), patch.object(cf, 'MEASURE', False),
+              patch.object(cf, 'leg', side_effect=lambda img, d, px, rec, label, **kw:
+                           calls.append((d, px, kw['drag_len'])) or img)):
+            cf.run_area('farm', lambda _: None)
+        self.assertEqual(calls, [('N', 600.0, cf.ENTRY_DRAG),
+                                 ('L', 350.0, cf.FARM_DRAG)] +
+                         [('R', 700.0, cf.FARM_DRAG), ('L', 700.0, cf.FARM_DRAG)] * 4)
 
     def exercise_filler(self, seconds, deadline, choices, cooldown=lambda: True,
                         visited=None):
