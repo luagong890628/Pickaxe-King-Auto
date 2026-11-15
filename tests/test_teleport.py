@@ -38,13 +38,19 @@ class TeleportTest(unittest.TestCase):
     def test_monster_a_is_enabled_as_filler_with_independent_route(self):
         self.assertEqual(cf.TILE['monster_a'], (350, 793))
         self.assertEqual(cf.ISLANDS, ('ice', 'shark', 'duck', 'truffle', 'monster_a'))
-        self.assertEqual(cf.ROUTES['monster_a'][0], ('N', 550.0, 300))
-        self.assertEqual(cf.ROUTES['monster_a'][1:], cf.ROUTES['ice'][1:])
+        self.assertEqual(cf.ROUTES['monster_a'][0], ('N', 550.0, 200))
+        self.assertEqual([(d, px) for d, px, _ in cf.ROUTES['monster_a'][1:]],
+                         [(d, px) for d, px, _ in cf.ROUTES['ice'][1:]])
+        self.assertTrue(all(act[2] == 200 for act in cf.ROUTES['monster_a']))
         self.assertIsNot(cf.ROUTES['monster_a'], cf.ROUTES['ice'])
         self.assertEqual(cf.REFRESH['monster_a'], 0.0)
-        actions = list(cf.island_actions('monster_a', max_loops=None))
-        self.assertEqual(actions[0], ('N', 550.0, 300))
-        self.assertEqual(actions[1:], list(cf.island_actions('ice', max_loops=None))[1:])
+        actions = [a for a in cf.island_actions('monster_a', max_loops=None)
+                   if a[0] != cf.ISLAND_RING_MARK]
+        self.assertEqual(actions[0], ('N', 550.0, 200))
+        expected = [a for a in cf.island_actions('ice', max_loops=None)
+                    if a[0] != cf.ISLAND_RING_MARK]
+        self.assertEqual([(d, px) for d, px, _ in actions[1:]],
+                         [(d, px) for d, px, _ in expected[1:]])
 
     def test_gesture_wait_is_0_3_seconds(self):
         # 2026-10-26 使用者指示 0.5 → 0.3（三個手勢都改）

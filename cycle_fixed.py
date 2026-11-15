@@ -282,10 +282,10 @@ ISLAND_LOOP_W = 1000.0
 ISLAND_LOOP_H = 850.0
 
 ISLAND_ROUTES = {
-    # 怪物島 A：北 550 已目視驗收；其餘沿用冰雪島候選，整條新版尚未實跑。
-    "monster_a": [("N", 550.0, 300), ("L", 500.0, 300),
-                  ("S", ISLAND_LOOP_H, 300), ("R", ISLAND_LOOP_W, 300),
-                  ("N", ISLAND_LOOP_H, 300), ("L", ISLAND_LOOP_W, 300)],
+    # 怪物島 A：進場與島內固定拖 200；走完四圈向內螺旋後，反向往外走一次。
+    "monster_a": [("N", 550.0, 200), ("L", 500.0, 200),
+                  ("S", ISLAND_LOOP_H, 200), ("R", ISLAND_LOOP_W, 200),
+                  ("N", ISLAND_LOOP_H, 200), ("L", ISLAND_LOOP_W, 200)],
     # 前 2 段＝進場（只走一次，把角色帶到生怪區的一個角落）；
     # 後 4 段＝一個完整外圈，之後每個循環由 ISLAND_SHRINK_PX 往內縮。
     # 四座外圈完全一樣（ISLAND_LOOP_W × ISLAND_LOOP_H），差別只在進場從哪個方向走進去。
@@ -378,6 +378,17 @@ def island_actions(area, max_loops=4):
         if i % loop_size == loop_size - 1:
             yield (ISLAND_RING_MARK,)
 
+
+def island_pass_actions(area):
+    """Return one inward spiral pass followed by its fixed outward reverse."""
+    inward = []
+    for act in island_actions(area, max_loops=4):
+        if act[0] != ISLAND_RING_MARK:
+            d, px, _ = route_act(act)
+            inward.append((d, px, 200.0))
+    opposite = {"N": "S", "S": "N", "L": "R", "R": "L"}
+    outward = [(opposite[d], px, drag) for d, px, drag in reversed(inward)]
+    return inward + outward
 
 def island_dwell_elapsed(start):
     """Return real elapsed island dwell; ``start`` comes from perf_counter."""
@@ -675,13 +686,18 @@ def run_island_filler(rec, deadline, visited=None, reverse=False):
         gesture = 0
         loop_count = 0
         dwell = 0.0
-        for act in island_actions(area, max_loops=None):
+        actions = (island_pass_actions(area)
+                   if area == "monster_a" else island_actions(area, max_loops=None))
+        for act in actions:
             if act[0] == ISLAND_RING_MARK:
                 loop_count += 1
                 continue
             d, px, override = route_act(act)
+            drag = override if override is not None else 300
+            if area == "monster_a":
+                drag = override
             img = leg(img, d, px, rec, f"{LABEL[area]}補空檔",
-                      drag_len=override if override is not None else 300,
+                      drag_len=drag,
                       settle=0)
             gesture += 1
             dwell = island_dwell_elapsed(island_started)

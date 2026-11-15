@@ -38,6 +38,15 @@ class IslandFillerContractTest(unittest.TestCase):
             self.assertIsNone(cf.choose_island())
             self.assertIsNone(cf.choose_island({"ice"}))
 
+    def test_monster_a_uses_200_drag_and_returns_outward_after_four_rings(self):
+        actions = cf.island_pass_actions('monster_a')
+        self.assertEqual(len(actions), 36)
+        self.assertEqual(actions[0], ('N', 550.0, 200))
+        self.assertEqual(actions[1], ('L', 500.0, 200))
+        self.assertEqual(actions[18], ('R', 300.0, 200.0))
+        self.assertEqual(actions[-1], ('S', 550.0, 200))
+        self.assertTrue(all(a[2] == 200 for a in actions))
+
     def test_island_rings_are_spiral(self):
         """四段螺旋：每兩段各縮一個 shrink，沒有額外內移手勢。"""
         acts = list(itertools.islice(cf.island_actions("ice", max_loops=2), 20))
