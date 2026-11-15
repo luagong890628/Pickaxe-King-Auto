@@ -19,10 +19,14 @@ echo.
 
 :ask_mode
 set "MODE="
-set /p "MODE=Choose 1 or 2: "
+set /p "MODE=Choose 1=Wi-Fi, 2=USB, or type port: "
 if "%MODE%"=="1" goto wifi
 if "%MODE%"=="2" goto check
-goto ask_mode
+set MODE | findstr /r /x "MODE=[1-9][0-9][0-9][0-9][0-9]" >nul
+if errorlevel 1 goto ask_mode
+if %MODE% GTR 65535 goto ask_mode
+set "PORT=%MODE%"
+goto connect_wifi
 
 :wifi
 echo.
@@ -31,6 +35,8 @@ echo Turn on Wireless debugging on the phone, then type its port.
 set "PORT="
 set /p "PORT=Port: "
 if "%PORT%"=="" goto ask_port
+:connect_wifi
+set "SERIAL=%PHONE%:%PORT%"
 echo.
 "%ADB%" connect %PHONE%:%PORT%
 goto check
