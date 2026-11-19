@@ -118,6 +118,7 @@ REFRESH = {"village": 100, "start": 100, "farm": 240,
 ## 執行
 
 **雙擊 `Pickaxe-King-Auto.bat`：輸入 `1` 走無線（再輸入無線偵錯埠號），也可直接輸入五位數埠號省略選擇；輸入 `2` 走 USB，按 Enter 才啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
+啟動器會先檢查本機 ADB server；若 server 沒有回應，只在啟動階段執行一次 `kill-server`／`start-server` 後重新檢查，不會在採集途中自動重啟或重送手勢。無線模式會把使用者輸入的 `IP:PORT` 設為 `ANDROID_SERIAL`；在有設定 `ANDROID_SERIAL` 時，`pkauto/adb.py` 的每個指令都會以 `adb -s TARGET` 固定 transport，避免同一支手機的 mDNS 項目造成選擇歧義。
 停止：先點選執行視窗，再按 Ctrl+C，程式會中止當前流程並關閉 log，不必等整輪跑完。
 console 只印開始、輪次、傳送到哪、開始採集（結束時印收工）；逐段細節仍寫在 `captures/*/log.jsonl`，要看即時逐段加 `--verbose`。
 若 CMD 詢問是否終止批次工作，輸入 Y 再按 Enter。

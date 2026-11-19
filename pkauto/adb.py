@@ -22,6 +22,15 @@ def adb_path() -> str:
     return os.environ.get("PKAUTO_ADB", DEFAULT_ADB)
 
 
+def _command(args) -> list[str]:
+    """組成 ADB 指令；有指定 serial 時固定使用該 transport。"""
+    serial = os.environ.get("ANDROID_SERIAL")
+    prefix = [adb_path()]
+    if serial:
+        prefix.extend(["-s", serial])
+    return [*prefix, *args]
+
+
 def shell(cmd: str, timeout: int = 30) -> str:
     """執行 adb shell 指令，回傳 stdout 字串。"""
     return _run(["shell", cmd], timeout=timeout).stdout.decode("utf-8", "replace")
@@ -39,7 +48,7 @@ def screen_size() -> tuple[int, int]:
 
 def _run(args, timeout=30):
     result = subprocess.run(
-        [adb_path(), *args], capture_output=True, timeout=timeout
+        _command(args), capture_output=True, timeout=timeout
     )
     if result.returncode:
         reason = result.stderr.decode("utf-8", "replace").strip()

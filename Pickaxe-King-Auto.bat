@@ -5,6 +5,7 @@ cd /d "%~dp0"
 set "ADB=D:\Tools\scrcpy-win64-v3.3.4\adb.exe"
 set "PHONE=192.168.18.21"
 set "PY=%~dp0.venv\Scripts\python.exe"
+set "SERIAL="
 
 if not exist "%PY%" goto no_python
 
@@ -21,7 +22,7 @@ echo.
 set "MODE="
 set /p "MODE=Choose 1=Wi-Fi, 2=USB, or type port: "
 if "%MODE%"=="1" goto wifi
-if "%MODE%"=="2" goto check
+if "%MODE%"=="2" goto ensure_adb
 set MODE | findstr /r /x "MODE=[1-9][0-9][0-9][0-9][0-9]" >nul
 if errorlevel 1 goto ask_mode
 if %MODE% GTR 65535 goto ask_mode
@@ -38,10 +39,32 @@ if "%PORT%"=="" goto ask_port
 :connect_wifi
 set "SERIAL=%PHONE%:%PORT%"
 echo.
-"%ADB%" connect %PHONE%:%PORT%
-goto check
+goto ensure_adb
 
-:check
+:ensure_adb
+"%ADB%" server-status >nul 2>&1
+if not errorlevel 1 (
+  if defined SERIAL "%ADB%" connect %SERIAL%
+  goto check_devices
+)
+:restart_adb_server
+echo ADB server is not responding; restarting it.
+"%ADB%" kill-server >nul 2>&1
+"%ADB%" start-server >nul 2>&1
+if errorlevel 1 goto adb_unavailable
+"%ADB%" server-status >nul 2>&1
+if errorlevel 1 goto adb_unavailable
+if defined SERIAL "%ADB%" connect %SERIAL%
+goto check_devices
+
+:adb_unavailable
+echo ADB server could not be started or is not responding.
+echo Check the ADB installation and any other process using port 5037.
+echo Press Enter to close
+set /p "_="
+exit /b 1
+
+:check_devices
 set "ONLINE=0"
 set "TARGET="
 for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do (
