@@ -117,10 +117,11 @@ REFRESH = {"village": 100, "start": 100, "farm": 240,
 
 ## 執行
 
-**雙擊 `Pickaxe-King-Auto.bat`：輸入 `1` 走 Wi-Fi（固定埠 5555），輸入 `2` 走 USB，按 Enter 才啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
-Wi-Fi 走的是 `adb tcpip 5555` 的**固定埠**，不是 Android 11+ 的「無線偵錯」（TLS＋mDNS、埠會隨機跳），所以手機端不需要開無線偵錯。**手機重新開機後 5555 會失效**：接上 USB 再執行啟動器，它會自己下 `adb -s <USB序號> tcpip 5555` 把埠開回來（只試一次，失敗會明確告知要檢查什麼）。
+**雙擊 `Pickaxe-King-Auto.bat`：完全不用輸入，它會自動偵測手機，按一個 Enter 就啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
+偵測由 `pkauto/adb.py` 的 `detect_target()` 負責（啟動器呼叫 `python -m pkauto.adb`），優先序：**無線偵錯的 mDNS 名稱 → 無線 IP:PORT → USB**。mDNS 名稱（`adb-<序號>-<後綴>._adb-tls-connect._tcp`）**跨埠跳動穩定**，所以不需要手輸埠號，也不需要固定埠 5555。實測：3 分鐘內換了 11 個埠，名稱全程不變；埠穩定後用名稱連續 16 次指令全成功。
+找不到任何裝置時會停下來並提示要開無線偵錯或接 USB，不會靜默繼續。
 adb 沿用 scrcpy 內附的 `D:/Tools/scrcpy-win64-v3.3.4/adb.exe`（36.0.0），可用 `PKAUTO_ADB` 覆寫。啟動器會先檢查本機 ADB server；若沒有回應，在啟動階段執行一次 `kill-server`／`start-server` 後重新檢查。
-採集途中 adb 這一層若斷掉，由 `pkauto/adb.py` 自動重開並重送那一個指令（見下方說明），不會整個流程中斷。啟動器把選定的 `IP:PORT`（或 USB 序號）設為 `ANDROID_SERIAL`；有設定時 `pkauto/adb.py` 每個指令都以 `adb -s TARGET` 固定 transport。
+採集途中 adb 這一層若斷掉，由 `pkauto/adb.py` 自動恢復並重送那一個指令（見下方說明），不會整個流程中斷。啟動器把偵測到的 target 設為 `ANDROID_SERIAL`；有設定時每個指令都以 `adb -s TARGET` 固定 transport。
 停止：先點選執行視窗，再按 Ctrl+C，程式會中止當前流程並關閉 log，不必等整輪跑完。
 console 只印開始、輪次、傳送到哪、開始採集（結束時印收工）；逐段細節仍寫在 `captures/*/log.jsonl`，要看即時逐段加 `--verbose`。
 若 CMD 詢問是否終止批次工作，輸入 Y 再按 Enter。
@@ -142,8 +143,10 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
 不再疊加主循環的 2.15 秒。需要量測時，畫面顯示與 tune log 共用同一次量測；
 長腿拆段會加總位移、取最低分數並合併來源，不另算首尾影像。
 
-**adb 這一層斷掉**時，`pkauto/adb.py` 會自動 `kill-server`／`start-server`（無線模式再 `connect IP:PORT`），
-等 1.5 秒讓裝置重新列舉後重送同一個指令，最多 3 次；console 會印「ADB 無回應（原因），重啟 adb server 後重試」。
+**adb 這一層斷掉**時，`pkauto/adb.py` 會重試同一個指令，最多 3 次，每次間隔 1.5 秒。
+**恢復方式依錯誤層級分流**：daemon 層級錯誤或逾時 → `kill-server`／`start-server`（無線 IP:PORT 再 `connect`）；
+裝置暫態（`device offline`／`not found`／`still connecting`／`still authorizing`）→ **只等待重送**，IP:PORT 才補 `connect`，mDNS 名稱交給 adb 自動重連，**不砍 server**（砍掉會摧毀所有 transport，對暫態太重）。
+console 會印「ADB 無回應（原因），重啟 adb server 後重試」或「…等待裝置就緒後重試」。
 
 判斷原則是「**指令到底有沒有送到手機**」，不是錯誤字面：
 
@@ -156,7 +159,7 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
   實機測試：連續 3 次逾時會停下來並印最後一次的原因，約 30 秒，恢復後 adb 仍可正常使用。
 - **確定已送達、但指令本身失敗**（例如手機回 `sh: xxx: not found`、`error: closed`）→ 不重試，直接停下來顯示原因。
 
-重試滿 3 次仍不行才停下來，錯誤訊息會註明「已重啟 adb server 3 次仍失敗」。
+重試滿 3 次仍不行才停下來，錯誤訊息會註明「已重試 3 次、重啟 server N 次仍失敗」。
 這不包含遊戲內的傳送成功判斷，仍維持純機械化、不偵測畫面。
 
 ## 換算（調參只改 px）
@@ -215,7 +218,11 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
   adb 的 socket flush 逾時（原始碼 `deferred_close` 只有 `fdevent_set_timeout(fde, 1s)` 且事件驅動）；
   電腦睡眠（System log 無 Kernel-Power，`STANDBYIDLE` AC/DC 皆 0）；崩潰當下無任何系統事件。
 - **port 跳動不是這次的原因**（崩潰時埠正常），但它是另一個獨立故障源：
-  日誌裡出現過 34587／39227／44643 三個不同埠。改用固定埠 5555 後不再受影響。
+  日誌裡出現過 34587／39227／44643 三個不同埠。**已用自動偵測解決**（2026-11-22 實測）：
+  mDNS 服務名稱 `adb-<序號>-<後綴>._adb-tls-connect._tcp` 的後綴，在 3 分鐘內 11 次換埠中**全程不變**；
+  埠穩定後用該名稱連續 16 次指令全成功。churn 期間的失敗是 `device '…' not found`（52 次）與
+  `device offline`（47 次），兩者都是「指令沒送到手機」的暫態，重試即可。
+  因此啟動器改用 `detect_target()` 自動偵測，**不再需要固定埠 5555，也不需要手輸埠號**。
 - **本機無線 TLS 的長期病歷**：`adb.log` 累計 108 次 `SSL_read failed [invalid library (0)]`、
   10 次 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`、3 次 `SSL_write failed`；
   openscreen mDNS 在 11-08 有 9 次 `WSASendMsg() failed (10065)`／`mdns_sender.cc:46 Error sending packet`。
@@ -230,9 +237,11 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
   之後才 `SendProtocolString(fd, service)` → 指令字串沒寫出去。
   `sockets.cpp` 的 `smart_socket_enqueue()` 兩個 `device offline (...)` 變體也都在 `connect_to_remote()` 之前。
   中途斷線時用戶端看到的是 EOF／RST／`closed`，不是 `device offline`。37.x 這幾處原始碼未變。
-- **21 秒 stall 的根因仍未確認，調查繼續中**。固定埠只解決了「埠跳動」這個已確認的獨立故障源，
-  **不宣稱能解決 stall**。20 分鐘耐跑被中斷，無資料；原本那次是 1h34m 才掛。
-  重試機制保留作為保底（使用者已同意）。
+- **21 秒 stall 的根因仍未確認，調查繼續中**。自動偵測只解決了「埠跳動」這個已確認的獨立故障源，
+  **不宣稱能解決 stall**。診斷儀表已建好並通過 30 秒 smoke：`captures/stall_watch.py`（每秒測 5037
+  accept 延遲＋server CPU 時間，可區分「被阻塞」與「忙等」）、`captures/proxy_load.py`（零重試代理負載，
+  不觸碰螢幕）、`captures/overnight_stall_test.py`（編排 traced server，`ADB_TRACE=fdevent,mdns,sockets`）。
+  **長時間重現尚未跑**；原本那次是 1h34m 才掛。重試機制保留作為保底（使用者已同意）。
 - 其他觀察（**候選嫌疑，沒有證據**連到那次 21 秒）：這台是 Modern Standby（S0，S3 不可用）；
   裝有 SoftEther VPN（`SeLow_x64.sys` 綁 Wi-Fi、`Neo6_x64_VPN.sys` 執行中，VPN 網路卡 Disconnected）
   與 Defender `WdNisDrv`，都是網路堆疊裡的過濾驅動程式。

@@ -7,7 +7,7 @@ All general rules in the parent `D:\project\AGENTS.md` apply; this file lists on
 - Always use this project's `.venv` Python: `.venv\Scripts\python.exe` (never the system Python — it has no cv2).
 - Dependencies: see `requirements.txt` (opencv-python, numpy).
 - Device: Samsung SM-S9360 (**Android 17**). adb defaults to `D:/Tools/scrcpy-win64-v3.3.4/adb.exe` (36.0.0); override with the `PKAUTO_ADB` environment variable. A newer 37.0.1 is installed at `D:/Tools/platform-tools/` but is deliberately not used yet — see the known-findings section of the README.
-- Connection: Wi-Fi uses the **fixed port** from `adb tcpip 5555` (not wireless debugging). After a phone reboot the port is gone and `tcpip 5555` must be re-issued over USB; the launcher does this automatically.
+- Connection: the launcher needs **no input** — `pkauto.adb.detect_target()` auto-detects the phone, preferring the wireless-debugging mDNS name (stable across port changes), then wireless IP:PORT, then USB. No fixed port and no manual port entry.
 - Game: `com.rogueuniongames.pickaxekingisland` (Unity).
 
 ## Principles

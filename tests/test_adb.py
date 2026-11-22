@@ -103,7 +103,7 @@ class NotDeliveredDetectionTest(unittest.TestCase):
 
 
 class AdbRecoveryTest(unittest.TestCase):
-    """指令沒送到手機時重開 server 再重送；已送達的失敗一律不重試。"""
+    """沒送到手機就重試：daemon 問題重開 server，裝置暫態只等待重送；已送達的失敗不重試。"""
 
     def test_daemon_gone_restarts_server_and_retries_command(self):
         calls = []
@@ -155,11 +155,11 @@ class AdbRecoveryTest(unittest.TestCase):
         self.assertEqual(calls, [TAP, ['adb.exe', 'kill-server'],
                                  ['adb.exe', 'start-server'], TAP])
 
-    def test_device_offline_is_retried_because_nothing_was_delivered(self):
+    def test_device_offline_retries_without_killing_server(self):
+        """裝置暫態：mDNS 會自己重連，不該砍掉整個 server。"""
         calls = []
         swipe = ['adb.exe', 'shell', 'input', 'swipe', '1', '2', '3', '4', '300']
-        queue = [completed(1, stderr=b'error: device offline'), completed(0),
-                 completed(0), completed(0, stdout=b'ok')]
+        queue = [completed(1, stderr=b'error: device offline'), completed(0, stdout=b'ok')]
 
         def run(argv, **_kwargs):
             calls.append(argv)
@@ -168,8 +168,35 @@ class AdbRecoveryTest(unittest.TestCase):
         with patched_adb(run):
             result = adb._run(['shell', 'input', 'swipe', '1', '2', '3', '4', '300'])
         self.assertEqual(result.stdout, b'ok')
-        self.assertEqual(calls, [swipe, ['adb.exe', 'kill-server'],
-                                 ['adb.exe', 'start-server'], swipe])
+        self.assertEqual(calls, [swipe, swipe])
+
+    def test_device_offline_with_ip_port_only_reconnects(self):
+        calls = []
+        queue = [completed(1, stderr=b'error: device offline'), completed(0),
+                 completed(0, stdout=b'ok')]
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return queue.pop(0)
+
+        with patched_adb(run, {'ANDROID_SERIAL': '192.168.18.21:41951'}):
+            adb._run(['shell', 'echo', 'ok'])
+        self.assertIn(['adb.exe', 'connect', '192.168.18.21:41951'], calls)
+        self.assertNotIn(['adb.exe', 'kill-server'], calls)
+
+    def test_device_offline_with_mdns_name_does_not_connect(self):
+        """mDNS 名稱由 adb 自動重連，補 connect 反而多餘。"""
+        calls = []
+        queue = [completed(1, stderr=b'error: device offline'), completed(0, stdout=b'ok')]
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return queue.pop(0)
+
+        with patched_adb(run, {'ANDROID_SERIAL': 'adb-R5GL15085ZJ-QZEuM7._adb-tls-connect._tcp'}):
+            adb._run(['shell', 'echo', 'ok'])
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(any(c[1] in ('connect', 'kill-server') for c in calls))
 
     def test_delivered_failure_is_never_retried(self):
         calls = []
@@ -202,7 +229,7 @@ class AdbRecoveryTest(unittest.TestCase):
             return completed(1, stderr=DEAD_DAEMON)
 
         with patched_adb(run):
-            with self.assertRaisesRegex(RuntimeError, '已重啟 adb server 3 次'):
+            with self.assertRaisesRegex(RuntimeError, '已重試 3 次、重啟 server 3 次'):
                 adb._run(['shell', 'input', 'tap', '1', '2'])
 
     def test_timeout_gives_up_with_clear_reason(self):
@@ -222,6 +249,67 @@ class AdbPathTest(unittest.TestCase):
             self.assertEqual(adb.adb_path(), adb.DEFAULT_ADB)
         with patch.dict(adb.os.environ, {'PKAUTO_ADB': 'X:/adb.exe'}, clear=True):
             self.assertEqual(adb.adb_path(), 'X:/adb.exe')
+
+
+class DetectTargetTest(unittest.TestCase):
+    """自動偵測：優先 mDNS 名稱，其次無線 IP:PORT，最後 USB；使用者不需輸入埠號。"""
+
+    MDNS = 'adb-R5GL15085ZJ-QZEuM7._adb-tls-connect._tcp'
+
+    def detect(self, stdout):
+        with patch.object(adb, 'adb_path', return_value='adb.exe'):
+            with patch.object(adb.subprocess, 'run', return_value=completed(0, stdout=stdout)):
+                with patch.object(adb.time, 'sleep'):
+                    return adb.detect_target(wait_s=0)
+
+    def test_prefers_mdns_name_over_ip_port_and_usb(self):
+        out = (b'List of devices attached\n'
+               b'R5GL15085ZJ\tdevice\n'
+               b'192.168.18.21:41951\tdevice\n'
+               + self.MDNS.encode() + b'\tdevice\n')
+        self.assertEqual(self.detect(out), self.MDNS)
+
+    def test_falls_back_to_wireless_ip_port(self):
+        out = (b'List of devices attached\n'
+               b'R5GL15085ZJ\tdevice\n'
+               b'192.168.18.21:41951\tdevice\n')
+        self.assertEqual(self.detect(out), '192.168.18.21:41951')
+
+    def test_falls_back_to_usb(self):
+        self.assertEqual(self.detect(b'List of devices attached\nR5GL15085ZJ\tdevice\n'),
+                         'R5GL15085ZJ')
+
+    def test_ignores_offline_and_unauthorized(self):
+        out = (b'List of devices attached\n'
+               + self.MDNS.encode() + b'\toffline\n'
+               b'192.168.18.21:41951\tunauthorized\n'
+               b'R5GL15085ZJ\tdevice\n')
+        self.assertEqual(self.detect(out), 'R5GL15085ZJ')
+
+    def test_discovers_via_mdns_when_no_transport_online(self):
+        calls = []
+        responses = [
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=(b'List of discovered mdns services\n'
+                                 b'adb-R5GL15085ZJ-QZEuM7\t_adb-tls-connect._tcp\t'
+                                 b'192.168.18.21:41951\n')),
+            completed(0, stdout=b'connected to 192.168.18.21:41951\n'),
+        ]
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return responses.pop(0)
+
+        with patch.object(adb, 'adb_path', return_value='adb.exe'):
+            with patch.object(adb.subprocess, 'run', side_effect=run):
+                with patch.object(adb.time, 'sleep'):
+                    got = adb.detect_target(wait_s=0)
+        self.assertEqual(got, self.MDNS)
+        self.assertIn(['adb.exe', 'connect', '192.168.18.21:41951'], calls)
+
+    def test_raises_when_nothing_found(self):
+        with self.assertRaisesRegex(RuntimeError, '找不到任何 adb 裝置'):
+            self.detect(b'List of devices attached\n')
 
 
 if __name__ == '__main__':

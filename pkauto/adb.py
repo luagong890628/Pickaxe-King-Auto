@@ -6,27 +6,33 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-# 全部是「指令根本沒送到手機」的錯誤，重送不會讓角色多走一段：daemon 連不上，
-# 或 transport 狀態在轉送前就被拒絕（AOSP 原始碼依據見 README「已知」）。
-NOT_DELIVERED_MARKERS = (
+# 全部是「指令根本沒送到手機」的錯誤，重送不會讓角色多走一段（AOSP 原始碼依據見 README「已知」）。
+# daemon 層級：server 本身有問題，必須重開。
+DAEMON_MARKERS = (
     "daemon still not running",   # server 死了且起不回來
     "daemon not running",         # server 已死，client 這次才把它拉起來
     "cannot connect to daemon",   # 連不上 127.0.0.1:5037
     "failed to check server version",
     "adb server didn't ack",
     "adb server version",
+)
+# 裝置暫態：transport 還沒就緒。mDNS 會自己重連，等待重送即可，砍掉整個 server 太重。
+DEVICE_STATE_MARKERS = (
     "device offline",             # 含 (no transport)／(transport offline) 兩個變體
     "device still connecting",
     "device still authorizing",
 )
-SERVER_RESTART_ATTEMPTS = 3     # 最多重開 server 幾次
-SERVER_RESTART_DELAY = 1.5      # 每次重開後等裝置重新列舉（秒）
+NOT_DELIVERED_MARKERS = DAEMON_MARKERS + DEVICE_STATE_MARKERS
+SERVER_RESTART_ATTEMPTS = 3     # 最多重試幾次
+SERVER_RESTART_DELAY = 1.5      # 每次重試前等裝置重新列舉（秒）
+MDNS_TLS_SUFFIX = "._adb-tls-connect._tcp"
 
 DEFAULT_ADB = r"D:/Tools/scrcpy-win64-v3.3.4/adb.exe"
 CAPTURES = Path(__file__).resolve().parent.parent / "captures"
@@ -70,6 +76,52 @@ def _not_delivered(stderr: bytes) -> bool:
     return "device '" in text and "not found" in text
 
 
+def _needs_server_restart(stderr: bytes) -> bool:
+    """只有 daemon 層級錯誤才需要重開 server；裝置暫態交給 mDNS 自己重連。"""
+    text = stderr.decode("utf-8", "replace").lower()
+    return any(marker in text for marker in DAEMON_MARKERS)
+
+
+def reconnect_transport() -> None:
+    """裝置暫態的輕量恢復：只補 connect，不砍 server。mDNS 名稱由 adb 自動重連。"""
+    serial = os.environ.get("ANDROID_SERIAL")
+    if serial and ":" in serial and not serial.endswith("._tcp"):
+        try:
+            subprocess.run([adb_path(), "connect", serial], capture_output=True, timeout=30)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+
+def detect_target(wait_s: float = 12.0) -> str:
+    """自動找出要用的 transport，使用者不需要輸入埠號。
+
+    優先序：無線偵錯的 mDNS 名稱 → 無線 IP:PORT → USB。
+    mDNS 名稱跨埠跳動穩定（實測 11 次換埠名稱不變），所以優先用它。
+    """
+    deadline = time.monotonic() + wait_s
+    while True:
+        r = subprocess.run([adb_path(), "devices"], capture_output=True, timeout=20)
+        online = []
+        for line in r.stdout.decode("utf-8", "replace").splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                online.append(parts[0])
+        for pick in (lambda s: s.endswith(MDNS_TLS_SUFFIX), lambda s: ":" in s, lambda s: True):
+            for serial in online:
+                if pick(serial):
+                    return serial
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(1.0)
+    r = subprocess.run([adb_path(), "mdns", "services"], capture_output=True, timeout=20)
+    for line in r.stdout.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "_adb-tls-connect._tcp":
+            subprocess.run([adb_path(), "connect", parts[2]], capture_output=True, timeout=30)
+            return parts[0] + MDNS_TLS_SUFFIX
+    raise RuntimeError("找不到任何 adb 裝置：請確認手機已開啟無線偵錯，或接上 USB 並允許 USB 偵錯")
+
+
 def restart_server() -> None:
     """重開 adb server（best effort）；無線 serial 必須重新 connect 才接得回。"""
     adb = adb_path()
@@ -85,29 +137,38 @@ def restart_server() -> None:
 
 
 def _run(args, timeout=30):
-    """跑一條 adb 指令；server 沒回應或卡到 timeout 就重開 server 重送（見 README「執行」）。"""
+    """跑一條 adb 指令；沒送到手機就重試。
+
+    daemon 層級錯誤或逾時才重開 server；裝置暫態只等待重送（見 README「執行」）。
+    """
     code = None
     reason = ""
+    restarts = 0
     for attempt in range(SERVER_RESTART_ATTEMPTS + 1):
         try:
             result = subprocess.run(_command(args), capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
-            code, reason, retry = None, f"指令逾時 {timeout}s", True
+            code, reason, retry, restart = None, f"指令逾時 {timeout}s", True, True
         else:
             if not result.returncode:
                 return result
             code = result.returncode
             reason = result.stderr.decode("utf-8", "replace").strip()
             retry = _not_delivered(result.stderr)
+            restart = _needs_server_restart(result.stderr)
         if not retry or attempt == SERVER_RESTART_ATTEMPTS:
             break
         print(f"ADB 無回應（{reason.splitlines()[0] if reason else '未知錯誤'}），"
-              f"重啟 adb server 後重試（{attempt + 1}/{SERVER_RESTART_ATTEMPTS}）",
-              flush=True)
-        restart_server()
+              f"{'重啟 adb server ' if restart else '等待裝置就緒'}後重試"
+              f"（{attempt + 1}/{SERVER_RESTART_ATTEMPTS}）", flush=True)
+        if restart:
+            restart_server()
+            restarts += 1
+        else:
+            reconnect_transport()
         time.sleep(SERVER_RESTART_DELAY)
     if attempt:
-        reason += f"（已重啟 adb server {attempt} 次仍失敗）"
+        reason += f"（已重試 {attempt} 次、重啟 server {restarts} 次仍失敗）"
     raise RuntimeError(f"ADB 指令失敗（{code or '逾時'}）：{reason}")
 
 
@@ -167,3 +228,12 @@ def current_app() -> str:
         if "mCurrentFocus" in line and "null" not in line:
             return line.strip()
     return ""
+
+
+if __name__ == "__main__":
+    # 給啟動器用：python -m pkauto.adb 印出自動偵測到的 target。
+    try:
+        print(detect_target())
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1)
