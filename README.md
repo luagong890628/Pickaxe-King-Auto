@@ -118,7 +118,7 @@ REFRESH = {"village": 100, "start": 100, "farm": 240,
 ## 執行
 
 **雙擊 `Pickaxe-King-Auto.bat`：輸入 `1` 走無線（再輸入無線偵錯埠號），也可直接輸入五位數埠號省略選擇；輸入 `2` 走 USB，按 Enter 才啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
-啟動器會先檢查本機 ADB server；若 server 沒有回應，只在啟動階段執行一次 `kill-server`／`start-server` 後重新檢查，不會在採集途中自動重啟或重送手勢。無線模式會把使用者輸入的 `IP:PORT` 設為 `ANDROID_SERIAL`；在有設定 `ANDROID_SERIAL` 時，`pkauto/adb.py` 的每個指令都會以 `adb -s TARGET` 固定 transport，避免同一支手機的 mDNS 項目造成選擇歧義。
+啟動器會先檢查本機 ADB server；若 server 沒有回應，在啟動階段執行一次 `kill-server`／`start-server` 後重新檢查。採集途中 adb server 若再消失，由 `pkauto/adb.py` 自動重開並重送那一個指令（見下方說明），不會整個流程中斷。無線模式會把使用者輸入的 `IP:PORT` 設為 `ANDROID_SERIAL`；在有設定 `ANDROID_SERIAL` 時，`pkauto/adb.py` 的每個指令都會以 `adb -s TARGET` 固定 transport，避免同一支手機的 mDNS 項目造成選擇歧義。
 停止：先點選執行視窗，再按 Ctrl+C，程式會中止當前流程並關閉 log，不必等整輪跑完。
 console 只印開始、輪次、傳送到哪、開始採集（結束時印收工）；逐段細節仍寫在 `captures/*/log.jsonl`，要看即時逐段加 `--verbose`。
 若 CMD 詢問是否終止批次工作，輸入 Y 再按 Enter。
@@ -140,7 +140,21 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
 不再疊加主循環的 2.15 秒。需要量測時，畫面顯示與 tune log 共用同一次量測；
 長腿拆段會加總位移、取最低分數並合併來源，不另算首尾影像。
 
-ADB 指令回報失敗（例如裝置離線）會停止程式並顯示原因，不會繼續空跑或自動重試。
+**adb 這一層斷掉**時，`pkauto/adb.py` 會自動 `kill-server`／`start-server`（無線模式再 `connect IP:PORT`），
+等 1.5 秒讓裝置重新列舉後重送同一個指令，最多 3 次；console 會印「ADB 無回應（原因），重啟 adb server 後重試」。
+適用三種情況：
+
+- **server 自己消失**（`daemon still not running`／無法連 127.0.0.1:5037）：指令根本沒送到手機，重送不影響走位。
+- **server 重開後無線裝置不在清單裡**（`device 'IP:PORT' not found`，實機 `kill-server` 後就是這個）：
+  重開 server 時會 `connect` 接回，第一條指令就自動恢復。
+- **指令卡到 timeout**（滑動 30 秒、其餘 30 秒）：時間遠長於任何一個手勢，代表 adb 卡住；
+  但**無法確定手勢有沒有送出**，重送最多可能讓那一段多走 3 次。偏移只影響當前這一站，下一站傳送就歸零。
+  實機測試：連續 3 次逾時會停下來並印最後一次的原因，約 30 秒，恢復後 adb 仍可正常使用。
+
+以上重試滿 3 次仍不行才停下來，錯誤訊息會註明「已重啟 adb server 3 次仍失敗」。
+
+其他 ADB 指令失敗（例如裝置離線 `device offline`）仍會停止程式並顯示原因，不會繼續空跑或重試手勢
+（那時手勢可能已經送出，重送會多走一段）。
 這不包含遊戲內的傳送成功判斷，仍維持純機械化、不偵測畫面。
 
 ## 換算（調參只改 px）
