@@ -1,49 +1,46 @@
-# Pickaxe King Auto — 專案規則
+# Pickaxe King Auto — Project Rules
 
-上層 `D:\project\AGENTS.md` 通則全部適用；本檔只列本專案特有事項。
+All general rules in the parent `D:\project\AGENTS.md` apply; this file lists only project-specific items.
 
-## 環境
+## Environment
 
-- Python 一律用本專案 `.venv`：`.venv\Scripts\python.exe`（勿用系統 python，系統 python 沒有 cv2）。
-- 依賴見 `requirements.txt`（opencv-python、numpy）。
-- 裝置：Samsung SM-S9360（Android 16）USB 連線。adb 預設 `D:/Tools/scrcpy-win64-v3.3.4/adb.exe`，可用環境變數 `PKAUTO_ADB` 覆寫。
-- 遊戲：`com.rogueuniongames.pickaxekingisland`（Unity）。
+- Always use this project's `.venv` Python: `.venv\Scripts\python.exe` (never the system Python — it has no cv2).
+- Dependencies: see `requirements.txt` (opencv-python, numpy).
+- Device: Samsung SM-S9360 (**Android 17**). adb defaults to `D:/Tools/scrcpy-win64-v3.3.4/adb.exe` (36.0.0); override with the `PKAUTO_ADB` environment variable. A newer 37.0.1 is installed at `D:/Tools/platform-tools/` but is deliberately not used yet — see the known-findings section of the README.
+- Connection: Wi-Fi uses the **fixed port** from `adb tcpip 5555` (not wireless debugging). After a phone reboot the port is gone and `tcpip 5555` must be re-issued over USB; the launcher does this automatically.
+- Game: `com.rogueuniongames.pickaxekingisland` (Unity).
 
-## 原則
+## Principles
 
-- 每次與手機互動都要可獨立重放：截圖存 `captures/`（不進版控）。
-- 自動點擊只允許發生在遊戲可視區（`pkauto.vision.PLAY_BOX`）：x 260–1140、y 700–2900。左右 UI 欄、頂部資源列不盲點。
-- 畫面判斷優先用可量測的訊號（相位相關位移、模板比對分數），且要在 `tests/` 用合成影像驗證，不靠目測猜。
-- 移動／採集邏輯必須能回答「現在角色在哪、目標在哪、這一步有沒有效」，效果用截圖前後差異驗證。
+- Every interaction with the phone must be independently replayable: save screenshots to `captures/` (not version-controlled).
+- Automated taps are allowed only inside the game's visible play area (`pkauto.vision.PLAY_BOX`): x 260–1140, y 700–2900. Never tap blindly on the left/right UI columns or the top resource bar.
+- Prefer measurable signals for screen decisions (phase-correlation displacement, template-match score), and verify them in `tests/` with synthetic images — never guess by eye.
+- Movement / gathering logic must be able to answer "where is the character now, where is the target, did this step work"; verify the effect from before/after screenshot differences.
 
-## 目前做法（2026-10-21 使用者定案：純機械化固定流程）
+## Current Approach (user decision 2026-10-21: purely mechanical fixed flow)
 
-- 唯一主程式 `cycle_fixed.py`：**不做任何畫面偵測**，全部固定座標 + 固定步數。
-- 一輪：傳送小村莊 → 北 3 步 → 左1北1右2南1 → 傳送起始之地 → 北 2 步 →
-  點 (721,1839) 休息 → 左1北1右2南1 → 等 30 秒。實測一輪 112 秒。
-- 傳送石 (1340,1670)、選單格子 (330,1464)/(720,1434)（選單先手動往上滑一次歸位）。
-- 一步 = 拖 250px、按住 950ms ≈ 走 300px（搖桿式：距離取決於按住時間，不是拖曳長度）。
-- **不要再引入畫面偵測**：先前所有偵測/地圖/觸控重播的做法都已證明不穩並移除
-  （詳見 README 的「歷史」與 git 歷史）。
+- The only main program is `cycle_fixed.py`: **no screen detection at all**, everything is fixed coordinates + fixed step counts.
+- One round: teleport to the small village → 3 steps north → left 1, north 1, right 2, south 1 → teleport to the starting land → 2 steps north → tap (721,1839) to rest → left 1, north 1, right 2, south 1 → wait 30 seconds. Measured: 112 seconds per round.
+- Teleport stone (1340,1670); menu cells (330,1464)/(720,1434) (swipe the menu up once manually first to reset it).
+- One step = drag 250px, hold 950ms ≈ walk 300px (joystick-style: distance depends on hold time, not drag length).
+- **Do not reintroduce screen detection**: every previous detection / map / touch-replay approach proved unstable and was removed (see the history section of the README and git history).
 
-## 程序管理（踩過大坑）
+## Process Management (learned the hard way)
 
-- **Hermes 的 process kill 只殺外層**，`python.exe` 子程序會活著 →
-  多個殘留 `record_touch.py` 同時寫入同一個 JSON → 檔案損毀、資料報銷。
-- 收工後一定用
+- **Hermes's process kill only kills the outer process**; the `python.exe` child stays alive → multiple leftover `record_touch.py` processes writing the same JSON → corrupted file, data lost.
+- After finishing, always verify with
   `powershell Get-CimInstance Win32_Process | Where CommandLine -like '*Pickaxe*'`
-  核對，沒有殘留才繼續。
-- 長時間錄製的檔案一律**原子寫入**（寫 `.tmp` 後 `os.replace`）。
+  and only continue once nothing is left over.
+- Files recorded over long runs must always be written **atomically** (write `.tmp`, then `os.replace`).
 
-## 測試
+## Tests
 
 ```
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## 文件
+## Documentation
 
-- `README.md` 記錄現況與操作方式；探索結論寫進 README 的「已知」段落。
-- 不下未驗證的結論；不確定就標「待確認」。
-- **給使用者看的圖一律存進 `captures/`**（agent 的 scratch 目錄使用者看不到），回報時附完整路徑；
-  需要使用者判斷位置時，圖上要畫格線或標註座標，並在訊息中同時列出座標文字。
+- `README.md` records the current state and how to operate; write investigation conclusions into its known-findings section.
+- Never state unverified conclusions; mark anything uncertain as "to be confirmed".
+- **Every image shown to the user must be saved into `captures/`** (the user cannot see the agent's scratch directory); include the full path when reporting. When the user needs to judge a position, draw a grid or annotate coordinates on the image, and list the coordinates as text in the message as well.

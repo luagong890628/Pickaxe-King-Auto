@@ -12,24 +12,24 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# 只有「指令根本沒送到手機」的錯誤才重開 server 重送。
-# 「device offline」**不在**此列：那時手勢確定已經送出，重送會走兩倍。
-DAEMON_ERROR_MARKERS = (
+# 全部是「指令根本沒送到手機」的錯誤，重送不會讓角色多走一段：daemon 連不上，
+# 或 transport 狀態在轉送前就被拒絕（AOSP 原始碼依據見 README「已知」）。
+NOT_DELIVERED_MARKERS = (
     "daemon still not running",   # server 死了且起不回來
     "daemon not running",         # server 已死，client 這次才把它拉起來
     "cannot connect to daemon",   # 連不上 127.0.0.1:5037
     "failed to check server version",
     "adb server didn't ack",
     "adb server version",
+    "device offline",             # 含 (no transport)／(transport offline) 兩個變體
+    "device still connecting",
+    "device still authorizing",
 )
 SERVER_RESTART_ATTEMPTS = 3     # 最多重開 server 幾次
 SERVER_RESTART_DELAY = 1.5      # 每次重開後等裝置重新列舉（秒）
 
 DEFAULT_ADB = r"D:/Tools/scrcpy-win64-v3.3.4/adb.exe"
 CAPTURES = Path(__file__).resolve().parent.parent / "captures"
-
-
-ADB_BIN = DEFAULT_ADB          # 相容用；建議改用 adb_path()
 
 
 def adb_path() -> str:
@@ -60,10 +60,10 @@ def screen_size() -> tuple[int, int]:
     return 1440, 3120
 
 
-def _daemon_error(stderr: bytes) -> bool:
-    """stderr 是否代表「指令根本沒送到手機」（實機實測的字串見 tests）。"""
+def _not_delivered(stderr: bytes) -> bool:
+    """stderr 是否代表「指令根本沒送到手機」（實機字串見 tests，原始碼依據見 README）。"""
     text = stderr.decode("utf-8", "replace").lower()
-    if any(marker in text for marker in DAEMON_ERROR_MARKERS):
+    if any(marker in text for marker in NOT_DELIVERED_MARKERS):
         return True
     # server 重開後無線裝置不在清單裡（device 'IP:PORT' not found），指令同樣沒送出；
     # 要求 "device '" 是為了排除手機上指令自己噴的 `sh: xxx: not found`。
@@ -98,7 +98,7 @@ def _run(args, timeout=30):
                 return result
             code = result.returncode
             reason = result.stderr.decode("utf-8", "replace").strip()
-            retry = _daemon_error(result.stderr)
+            retry = _not_delivered(result.stderr)
         if not retry or attempt == SERVER_RESTART_ATTEMPTS:
             break
         print(f"ADB 無回應（{reason.splitlines()[0] if reason else '未知錯誤'}），"

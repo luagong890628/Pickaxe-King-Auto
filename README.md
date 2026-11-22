@@ -117,8 +117,10 @@ REFRESH = {"village": 100, "start": 100, "farm": 240,
 
 ## 執行
 
-**雙擊 `Pickaxe-King-Auto.bat`：輸入 `1` 走無線（再輸入無線偵錯埠號），也可直接輸入五位數埠號省略選擇；輸入 `2` 走 USB，按 Enter 才啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
-啟動器會先檢查本機 ADB server；若 server 沒有回應，在啟動階段執行一次 `kill-server`／`start-server` 後重新檢查。採集途中 adb server 若再消失，由 `pkauto/adb.py` 自動重開並重送那一個指令（見下方說明），不會整個流程中斷。無線模式會把使用者輸入的 `IP:PORT` 設為 `ANDROID_SERIAL`；在有設定 `ANDROID_SERIAL` 時，`pkauto/adb.py` 的每個指令都會以 `adb -s TARGET` 固定 transport，避免同一支手機的 mDNS 項目造成選擇歧義。
+**雙擊 `Pickaxe-King-Auto.bat`：輸入 `1` 走 Wi-Fi（固定埠 5555），輸入 `2` 走 USB，按 Enter 才啟動，開始無限循環**（遊戲開著即可），不再預設四小時結束。
+Wi-Fi 走的是 `adb tcpip 5555` 的**固定埠**，不是 Android 11+ 的「無線偵錯」（TLS＋mDNS、埠會隨機跳），所以手機端不需要開無線偵錯。**手機重新開機後 5555 會失效**：接上 USB 再執行啟動器，它會自己下 `adb -s <USB序號> tcpip 5555` 把埠開回來（只試一次，失敗會明確告知要檢查什麼）。
+adb 沿用 scrcpy 內附的 `D:/Tools/scrcpy-win64-v3.3.4/adb.exe`（36.0.0），可用 `PKAUTO_ADB` 覆寫。啟動器會先檢查本機 ADB server；若沒有回應，在啟動階段執行一次 `kill-server`／`start-server` 後重新檢查。
+採集途中 adb 這一層若斷掉，由 `pkauto/adb.py` 自動重開並重送那一個指令（見下方說明），不會整個流程中斷。啟動器把選定的 `IP:PORT`（或 USB 序號）設為 `ANDROID_SERIAL`；有設定時 `pkauto/adb.py` 每個指令都以 `adb -s TARGET` 固定 transport。
 停止：先點選執行視窗，再按 Ctrl+C，程式會中止當前流程並關閉 log，不必等整輪跑完。
 console 只印開始、輪次、傳送到哪、開始採集（結束時印收工）；逐段細節仍寫在 `captures/*/log.jsonl`，要看即時逐段加 `--verbose`。
 若 CMD 詢問是否終止批次工作，輸入 Y 再按 Enter。
@@ -142,19 +144,19 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
 
 **adb 這一層斷掉**時，`pkauto/adb.py` 會自動 `kill-server`／`start-server`（無線模式再 `connect IP:PORT`），
 等 1.5 秒讓裝置重新列舉後重送同一個指令，最多 3 次；console 會印「ADB 無回應（原因），重啟 adb server 後重試」。
-適用三種情況：
 
-- **server 自己消失**（`daemon still not running`／無法連 127.0.0.1:5037）：指令根本沒送到手機，重送不影響走位。
-- **server 重開後無線裝置不在清單裡**（`device 'IP:PORT' not found`，實機 `kill-server` 後就是這個）：
-  重開 server 時會 `connect` 接回，第一條指令就自動恢復。
-- **指令卡到 timeout**（滑動 30 秒、其餘 30 秒）：時間遠長於任何一個手勢，代表 adb 卡住；
-  但**無法確定手勢有沒有送出**，重送最多可能讓那一段多走 3 次。偏移只影響當前這一站，下一站傳送就歸零。
+判斷原則是「**指令到底有沒有送到手機**」，不是錯誤字面：
+
+- **沒送到 → 重送安全**：`daemon still not running`／無法連 127.0.0.1:5037、
+  `device 'IP:PORT' not found`（實機 `kill-server` 後就是這個）、
+  `device offline`（含 `(no transport)`／`(transport offline)`）、`device still connecting`、`device still authorizing`。
+  這些全部在 AOSP 的「選 transport」階段就被拒絕，`shell:input swipe` 字串根本沒寫出去（原始碼依據見「已知」）。
+- **可能已送到 → 重送會多走**：指令卡到 timeout（滑動與其餘皆 30 秒，遠長於任何一個手勢）。
+  目前仍重試最多 3 次，所以那一段最多可能多走 3 次；偏移只影響當前這一站，下一站傳送就歸零。
   實機測試：連續 3 次逾時會停下來並印最後一次的原因，約 30 秒，恢復後 adb 仍可正常使用。
+- **確定已送達、但指令本身失敗**（例如手機回 `sh: xxx: not found`、`error: closed`）→ 不重試，直接停下來顯示原因。
 
-以上重試滿 3 次仍不行才停下來，錯誤訊息會註明「已重啟 adb server 3 次仍失敗」。
-
-其他 ADB 指令失敗（例如裝置離線 `device offline`）仍會停止程式並顯示原因，不會繼續空跑或重試手勢
-（那時手勢可能已經送出，重送會多走一段）。
+重試滿 3 次仍不行才停下來，錯誤訊息會註明「已重啟 adb server 3 次仍失敗」。
 這不包含遊戲內的傳送成功判斷，仍維持純機械化、不偵測畫面。
 
 ## 換算（調參只改 px）
@@ -197,6 +199,46 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
 - 不要點畫面上「很大一塊白色」的東西（那是彈窗／黑市），休息框例外且位置固定。
 - 背景程序要殺乾淨：Hermes 的 process kill 只殺外層，python 子程序會活著。
   用 `Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' -and $_.CommandLine -like '*cycle_fixed*' }` 確認。
+
+## 已知（adb 斷線調查，2026-11-22）
+
+2026-11-21 22:31 那次跑到 111 站、1 小時 34 分後崩潰，錯誤是
+`cannot connect to daemon at tcp:5037 ... (10060)`。查證結果（診斷指令碼在 `captures/`，不進版控）：
+
+- **10060 = Windows WSAETIMEDOUT；21 秒是 TCP connect 的 SYN 重試預算（3+6+12）**。
+  實測對黑洞 IP 下 `adb connect` 花 21.05 秒回報 10060，與 log 的 21 秒空檔吻合。
+- **server 沒有死**：`adb.log`（路徑由 `adb server-status` 指出，跨 session 追加）顯示
+  當時的 server PID 6948 從 11-14 一直活到 11-22 16:19，崩潰後 03:48 仍在寫日誌。
+- **transport 也沒斷**：那條無線 TLS transport 22:31:10 建立、03:48:58 才 read failed。
+- 所以是「**server 活著但暫時不 accept 連線**」，**確切觸發點仍未鎖定**。已排除：
+  對外 blocking connect 卡住事件迴圈（黑洞 connect 那 21 秒內 101 次 USB 探測全成功、最慢 0.08s、PID 不變）；
+  adb 的 socket flush 逾時（原始碼 `deferred_close` 只有 `fdevent_set_timeout(fde, 1s)` 且事件驅動）；
+  電腦睡眠（System log 無 Kernel-Power，`STANDBYIDLE` AC/DC 皆 0）；崩潰當下無任何系統事件。
+- **port 跳動不是這次的原因**（崩潰時埠正常），但它是另一個獨立故障源：
+  日誌裡出現過 34587／39227／44643 三個不同埠。改用固定埠 5555 後不再受影響。
+- **本機無線 TLS 的長期病歷**：`adb.log` 累計 108 次 `SSL_read failed [invalid library (0)]`、
+  10 次 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`、3 次 `SSL_write failed`；
+  openscreen mDNS 在 11-08 有 9 次 `WSASendMsg() failed (10065)`／`mdns_sender.cc:46 Error sending packet`。
+  upstream 多次修過 mDNS 帶垮 server（33.0.1 Windows mdns crashes、35.0.2 截斷查詢、37.0.3），
+  且 **37.0.1 直接刪除 openscreen**（實測 37.0.1 二進位裡 openscreen 字串數 0，36.0.0 是 37）。
+  **但這些只是「有病歷的故障面」，不是已證實的崩潰原因**：崩潰當下日誌沒有 mDNS 錯誤、
+  TLS transport 也還活著。曾據此升級 37.0.1＋`ADB_MDNS=0`，**因根因未確認已退回**
+  （使用者決定：先測試確定根因再實作）。37.0.1 仍裝在 `D:/Tools/platform-tools/`，目前未使用。
+- **`device offline` 可以安全重試**（原本以為不行，已修正）。AOSP `android-16.0.0_r1`：
+  `transport.cpp` 的 `acquire_one_transport()` 在 `case kCsOffline` 就把 `result = nullptr`；
+  `client/adb_client.cpp` 的 `_adb_connect()` 先 `switch_socket_transport()`、失敗即 `return -1`，
+  之後才 `SendProtocolString(fd, service)` → 指令字串沒寫出去。
+  `sockets.cpp` 的 `smart_socket_enqueue()` 兩個 `device offline (...)` 變體也都在 `connect_to_remote()` 之前。
+  中途斷線時用戶端看到的是 EOF／RST／`closed`，不是 `device offline`。37.x 這幾處原始碼未變。
+- **21 秒 stall 的根因仍未確認，調查繼續中**。固定埠只解決了「埠跳動」這個已確認的獨立故障源，
+  **不宣稱能解決 stall**。20 分鐘耐跑被中斷，無資料；原本那次是 1h34m 才掛。
+  重試機制保留作為保底（使用者已同意）。
+- 其他觀察（**候選嫌疑，沒有證據**連到那次 21 秒）：這台是 Modern Standby（S0，S3 不可用）；
+  裝有 SoftEther VPN（`SeLow_x64.sys` 綁 Wi-Fi、`Neo6_x64_VPN.sys` 執行中，VPN 網路卡 Disconnected）
+  與 Defender `WdNisDrv`，都是網路堆疊裡的過濾驅動程式。
+- 手機是 **Android 17**（`ro.build.version.release`），不是舊文件寫的 16。
+- `adb tcpip 5555` 只寫 `service.adb.tcp.port`，**不持久**：重新開機即失效，需接 USB 重下。
+  5555 是**明文 adb**，區域網路內任何裝置都能連（無線偵錯至少有 TLS）——這是安全性取捨。
 
 ## 遊戲事實（使用者確認）
 

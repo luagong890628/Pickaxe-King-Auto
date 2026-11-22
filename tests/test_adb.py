@@ -67,10 +67,10 @@ DEAD_DAEMON = (b'error: * daemon still not running\r\n'
 TAP = ['adb.exe', 'shell', 'input', 'tap', '1', '2']
 
 
-class DaemonErrorDetectionTest(unittest.TestCase):
-    """用實機實測收到的 stderr 驗證判斷，不靠推測。"""
+class NotDeliveredDetectionTest(unittest.TestCase):
+    """用實機 stderr 與 AOSP 原始碼位置驗證判斷，不靠推測。"""
 
-    def test_delivered_nothing_errors_are_daemon_errors(self):
+    def test_not_delivered_errors_are_retryable(self):
         cases = [
             # 實測：kill-server 後的第一條指令，client 自己拉起 server、無線裝置沒接回
             b"* daemon not running; starting now at tcp:5037\r\n"
@@ -82,22 +82,28 @@ class DaemonErrorDetectionTest(unittest.TestCase):
             b"cannot connect to 127.0.0.1:5037 (10060)\r\n",
             # 無線 transport 掉了，但 server 還活著
             b"adb.exe: device '192.168.18.21:44643' not found\r\n",
+            # transport.cpp acquire_one_transport()：選 transport 階段就拒絕，指令沒轉送
+            b"error: device offline\r\n",
+            b"error: device offline (no transport)\r\n",
+            b"error: device offline (transport offline)\r\n",
+            b"error: device still connecting\r\n",
+            b"error: device still authorizing\r\n",
         ]
         for stderr in cases:
-            self.assertTrue(adb._daemon_error(stderr), stderr)
+            self.assertTrue(adb._not_delivered(stderr), stderr)
 
-    def test_delivered_errors_are_not_daemon_errors(self):
+    def test_delivered_errors_are_not_retryable(self):
         cases = [
-            b"error: device offline\r\n",      # 免費手勢可能已送出，重送會走兩倍
-            b"sh: socat: not found\r\n",       # 手機上指令自己噴的，不是 transport
+            b"sh: socat: not found\r\n",   # 手機上指令自己噴的，代表指令已送達
+            b"error: closed\r\n",          # 轉送後中途斷線，手勢可能已執行
             b"",
         ]
         for stderr in cases:
-            self.assertFalse(adb._daemon_error(stderr), stderr)
+            self.assertFalse(adb._not_delivered(stderr), stderr)
 
 
-class AdbDaemonRecoveryTest(unittest.TestCase):
-    """adb server 死掉或卡住時，重開 server 再重送；其他錯誤一律不重試。"""
+class AdbRecoveryTest(unittest.TestCase):
+    """指令沒送到手機時重開 server 再重送；已送達的失敗一律不重試。"""
 
     def test_daemon_gone_restarts_server_and_retries_command(self):
         calls = []
@@ -149,16 +155,32 @@ class AdbDaemonRecoveryTest(unittest.TestCase):
         self.assertEqual(calls, [TAP, ['adb.exe', 'kill-server'],
                                  ['adb.exe', 'start-server'], TAP])
 
-    def test_device_offline_is_never_retried(self):
+    def test_device_offline_is_retried_because_nothing_was_delivered(self):
+        calls = []
+        swipe = ['adb.exe', 'shell', 'input', 'swipe', '1', '2', '3', '4', '300']
+        queue = [completed(1, stderr=b'error: device offline'), completed(0),
+                 completed(0), completed(0, stdout=b'ok')]
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return queue.pop(0)
+
+        with patched_adb(run):
+            result = adb._run(['shell', 'input', 'swipe', '1', '2', '3', '4', '300'])
+        self.assertEqual(result.stdout, b'ok')
+        self.assertEqual(calls, [swipe, ['adb.exe', 'kill-server'],
+                                 ['adb.exe', 'start-server'], swipe])
+
+    def test_delivered_failure_is_never_retried(self):
         calls = []
 
         def run(argv, **_kwargs):
             calls.append(argv)
-            return completed(1, stderr=b'error: device offline')
+            return completed(1, stderr=b'sh: socat: not found')
 
         with patched_adb(run):
-            with self.assertRaisesRegex(RuntimeError, 'device offline'):
-                adb._run(['shell', 'input', 'swipe', '1', '2', '3', '4', '300'])
+            with self.assertRaisesRegex(RuntimeError, 'socat'):
+                adb._run(['shell', 'socat'])
         self.assertEqual(len(calls), 1)
 
     def test_restart_server_survives_hung_adb(self):
@@ -192,6 +214,14 @@ class AdbDaemonRecoveryTest(unittest.TestCase):
         with patched_adb(run):
             with self.assertRaisesRegex(RuntimeError, '逾時.*3 次仍失敗'):
                 adb._run(['shell', 'input', 'tap', '1', '2'])
+
+
+class AdbPathTest(unittest.TestCase):
+    def test_adb_path_honours_override(self):
+        with patch.dict(adb.os.environ, {}, clear=True):
+            self.assertEqual(adb.adb_path(), adb.DEFAULT_ADB)
+        with patch.dict(adb.os.environ, {'PKAUTO_ADB': 'X:/adb.exe'}, clear=True):
+            self.assertEqual(adb.adb_path(), 'X:/adb.exe')
 
 
 if __name__ == '__main__':
