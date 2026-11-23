@@ -249,6 +249,34 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」或�
 - `adb tcpip 5555` 只寫 `service.adb.tcp.port`，**不持久**：重新開機即失效，需接 USB 重下。
   5555 是**明文 adb**，區域網路內任何裝置都能連（無線偵錯至少有 TLS）——這是安全性取捨。
 
+## 已知（2026-11-23 夜間 stall 重現測試結果）
+
+`captures/overnight_stall_test.py`（traced server + `stall_watch` + `proxy_load`）01:01–06:28；
+同時 `cycle_fixed.py` 01:01:21 起跑（`--minutes` 未給＝無限），262 站、3.67 小時。
+
+- **stall（server 活著但不 accept）沒有重現**：`stall_watch` 19608 筆、0 次 stalled；
+  5037 連線 p99 0.026s，最大 1.56s 是 server 被殺後重啟那一下（04:41:32）。
+  原本的故障是跑 1h34m 後出現 21 秒 10060，這次 3.67 小時內沒有出現。
+- **04:41:30 的中斷是測試自己造成的**：22:41 啟動的上一支測試（`MINUTES=360`，正好 04:41 到期）
+  在 `finally` 執行 `adb kill-server`，把新測試的 traced server（pid 30588）殺掉，
+  trace log 最後一行就是 `SS(0): 'host:kill'` → `adb server killed by remote request`。
+  同一秒遊戲的 swipe 拿到 `rc=255`／**空 stderr**，而 `pkauto/adb.py` 的 `_not_delivered()` 只看 stderr 字串，
+  空字串被判成「可能已送到」→ 不重試 → `_run()` 直接拋 `RuntimeError`。
+  遊戲 log 因此最後是 `收工（完成 262 站）`（`finally` 一定會寫）卻**沒有** `使用者停止（Ctrl+C）`，
+  且啟動時 `分鐘=null`（無限）→ 不是到期，是例外往外拋（traceback 只印在 console）。
+  兩個測試實例從 01:01 起並存：新實例也曾在 01:01 用 `kill-server` 殺掉 22:41 的 server，
+  `stall_watch_20261122_224129` 唯一一次 2.04s「stall」就是那一刻。
+  **重跑前先確認沒有舊實例**（腳本現在有 lock 擋第二支、並且偵測到 `cycle_fixed.py` 在跑就拒跑／
+  收尾時不砍 server；`proxy_load` 連續 300 秒碰不到裝置會記 `device_lost` 並結束，不再灌 1 萬筆重複錯誤）。
+  **啟動順序：先跑測試 → 再啟動遊戲；早上先停遊戲 → 再 Ctrl+C 停測試**（不然收尾會保留 traced server）。
+- **05:46:50 是手機端消失，不是 host 端**：兩個 transport 同時轉 `offline`，05:48:50 `devices` 清單全空，
+  `adb mdns services` 也掃不到服務；之後 945 次 `device offline`、15940 次 `device not found`，
+  直到 06:27 手動 Ctrl+C。這段時間 5037 探測一直 0.001s，server 端正常。
+  手機側是 adbd 重啟、無線偵錯被關掉或 Wi-Fi 掉，**是哪一種尚未確認**。
+- 期間兩次 10 秒級延遲（01:09:52 10.9s、04:45:57 10.8s，rc 皆 0＝成功），同一秒 5037 探測仍 <0.03s
+  → 不是 server 阻塞，是 client 端（疑似 mDNS/TLS transport 重建）造成，兩次都自行恢復。**待確認**。
+  遊戲 log 的最大空檔 9.0 秒（01:09:44）正好對上第一次。
+
 ## 遊戲事實（使用者確認）
 
 - 角色固定在畫面 **(720,1400)**，畫面跟著角色移動。

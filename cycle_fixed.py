@@ -895,6 +895,13 @@ def main():
 
     except KeyboardInterrupt:
         rec({"note": "使用者停止（Ctrl+C）", "big": True, "show": "使用者停止（Ctrl+C）"})
+    except Exception as exc:
+        # 例外會讓程序結束，而 finally 一定會寫「收工」→ 事後只看得到「收工」＋
+        # 只印在 console 的 traceback（2026-11-23 那次中斷就是這樣查不到原因）。
+        # 這裡把原因寫進 log 再往外拋，行為（中止）不變。
+        rec({"note": f"中止：{type(exc).__name__}: {exc}", "big": True,
+             "show": f"中止：{type(exc).__name__}: {exc}"})
+        raise
     finally:
         rec({"note": "收工", "big": True, "show": f"收工（完成 {steps} 站）",
              "站數": steps, "小時": round((time.time() - t0) / 3600, 2)})
