@@ -286,26 +286,59 @@ class DetectTargetTest(unittest.TestCase):
                b'R5GL15085ZJ\tdevice\n')
         self.assertEqual(self.detect(out), 'R5GL15085ZJ')
 
-    def test_discovers_via_mdns_when_no_transport_online(self):
+    def detect_with_responses(self, responses):
+        """依序回放 adb 輸出；多要一次回應就 IndexError（= 呼叫順序變了）。"""
         calls = []
-        responses = [
-            completed(0, stdout=b'List of devices attached\n'),
-            completed(0, stdout=(b'List of discovered mdns services\n'
-                                 b'adb-R5GL15085ZJ-QZEuM7\t_adb-tls-connect._tcp\t'
-                                 b'192.168.18.21:41951\n')),
-            completed(0, stdout=b'connected to 192.168.18.21:41951\n'),
-        ]
+        queue = list(responses)
 
         def run(argv, **_kwargs):
             calls.append(argv)
-            return responses.pop(0)
+            return queue.pop(0)
 
         with patch.object(adb, 'adb_path', return_value='adb.exe'):
             with patch.object(adb.subprocess, 'run', side_effect=run):
                 with patch.object(adb.time, 'sleep'):
-                    got = adb.detect_target(wait_s=0)
+                    return adb.detect_target(wait_s=0), calls
+
+    MDNS_SERVICES = (b'List of discovered mdns services\n'
+                     b'adb-R5GL15085ZJ-QZEuM7\t_adb-tls-connect._tcp\t'
+                     b'192.168.18.21:41951\n')
+
+    def test_discovers_via_mdns_when_no_transport_online(self):
+        """mDNS 名稱真的在線時回名稱（跨埠跳動較穩定）。"""
+        got, calls = self.detect_with_responses([
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=self.MDNS_SERVICES),
+            completed(0, stdout=b'connected to 192.168.18.21:41951\n'),
+            completed(0, stdout=b'List of devices attached\n'
+                                + self.MDNS.encode() + b'\tdevice\n'),
+        ])
         self.assertEqual(got, self.MDNS)
         self.assertIn(['adb.exe', 'connect', '192.168.18.21:41951'], calls)
+
+    def test_mdns_fallback_returns_online_endpoint_when_name_not_registered(self):
+        """2026-11-23 的 bug：server 重開後只有 IP:PORT 在線，名稱別名不存在。
+
+        舊行為直接回名稱 → 之後每條指令都 `device '...' not found`，重試 3 次整個流程停掉。
+        現在必須回 devices 裡真的 `device` 的那一個。
+        """
+        got, calls = self.detect_with_responses([
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=self.MDNS_SERVICES),
+            completed(0, stdout=b'already connected to 192.168.18.21:41951\n'),
+            completed(0, stdout=b'List of devices attached\n'
+                                b'192.168.18.21:41951\tdevice\n'),
+        ])
+        self.assertEqual(got, '192.168.18.21:41951')
+        self.assertIn(['adb.exe', 'connect', '192.168.18.21:41951'], calls)
+
+    def test_mdns_fallback_raises_when_connect_never_comes_online(self):
+        responses = [completed(0, stdout=b'List of devices attached\n'),
+                     completed(0, stdout=self.MDNS_SERVICES),
+                     completed(0, stdout=b'connected to 192.168.18.21:41951\n')]
+        responses += [completed(0, stdout=b'List of devices attached\n')] * 20
+        with self.assertRaisesRegex(RuntimeError, '找不到任何 adb 裝置'):
+            self.detect_with_responses(responses)
 
     def test_raises_when_nothing_found(self):
         with self.assertRaisesRegex(RuntimeError, '找不到任何 adb 裝置'):

@@ -277,6 +277,17 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」或�
   → 不是 server 阻塞，是 client 端（疑似 mDNS/TLS transport 重建）造成，兩次都自行恢復。**待確認**。
   遊戲 log 的最大空檔 9.0 秒（01:09:44）正好對上第一次。
 
+## 已知（自動偵測回傳「不在線」的 mDNS 名稱，2026-11-23）
+
+- **現象**：`detect_target()` 有時回傳 mDNS 名稱，但那個名稱不在 `adb devices` 裡
+  （server 重開後同一支手機只以 `IP:PORT` 註冊；`adb connect <mDNS 名稱>` 也不支援，會當成 host 去解析 port 5555 而失敗）。
+  啟動器會印 `Connected: adb-…._tcp`，但之後每一條指令都 `device '…' not found`，重試 3 次後整個流程停掉。
+- **修法**：`detect_target()` 只回傳 `devices` 裡狀態真的是 `device` 的 serial。mDNS 分支送出 `connect`
+  之後會輪詢確認：名稱在線就回名稱（跨埠較穩），名稱不在線就回實際在線的 `IP:PORT`，兩者都沒上線就報錯。
+  迴歸測試：`tests/test_adb.py::DetectTargetTest`。
+- **殘留風險（未修，待決定）**：若遊戲 pin 在 `IP:PORT`，而手機中途換埠（重開無線偵錯／adbd 重啟），
+  `_not_delivered()` 的重試只會 `connect` 同一個舊埠 → 3 次後仍失敗。pin 在 mDNS 名稱時不受影響。
+
 ## 遊戲事實（使用者確認）
 
 - 角色固定在畫面 **(720,1400)**，畫面跟著角色移動。
