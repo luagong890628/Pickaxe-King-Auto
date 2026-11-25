@@ -137,23 +137,36 @@ class AdbRecoveryTest(unittest.TestCase):
                          ['adb.exe', '-s', '192.168.18.21:36545',
                           'shell', 'input', 'tap', '1', '2'])
 
-    def test_stalled_command_restarts_server_and_retries(self):
+    def test_first_timeout_retries_without_killing_server(self):
+        """逾時代表 connect 成功、指令已送到 server：先只重送，別毀掉 traced server。"""
         calls = []
-        stalled = {'done': False}
 
         def run(argv, **kwargs):
             calls.append(argv)
-            if argv[-1] in ('kill-server', 'start-server'):
-                return completed(0)
-            if not stalled['done']:
-                stalled['done'] = True
+            if len(calls) == 1:
                 raise adb.subprocess.TimeoutExpired(argv, kwargs['timeout'])
             return completed(0, stdout=b'ok')
 
         with patched_adb(run):
             result = adb._run(['shell', 'input', 'tap', '1', '2'])
         self.assertEqual(result.stdout, b'ok')
-        self.assertEqual(calls, [TAP, ['adb.exe', 'kill-server'],
+        self.assertEqual(calls, [TAP, TAP])
+
+    def test_timeout_restarts_server_when_it_repeats(self):
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            if argv[-1] in ('kill-server', 'start-server'):
+                return completed(0)
+            if len(calls) <= 2:
+                raise adb.subprocess.TimeoutExpired(argv, kwargs['timeout'])
+            return completed(0, stdout=b'ok')
+
+        with patched_adb(run):
+            result = adb._run(['shell', 'input', 'tap', '1', '2'])
+        self.assertEqual(result.stdout, b'ok')
+        self.assertEqual(calls, [TAP, TAP, ['adb.exe', 'kill-server'],
                                  ['adb.exe', 'start-server'], TAP])
 
     def test_device_offline_retries_without_killing_server(self):
@@ -240,7 +253,8 @@ class AdbRecoveryTest(unittest.TestCase):
             raise adb.subprocess.TimeoutExpired(argv, kwargs['timeout'])
 
         with patched_adb(run):
-            with self.assertRaisesRegex(RuntimeError, '逾時.*3 次仍失敗'):
+            # 4 次逾時、第 1 次用掉寬限 → 只重開 2 次
+            with self.assertRaisesRegex(RuntimeError, '逾時.*已重試 3 次、重啟 server 2 次仍失敗'):
                 adb._run(['shell', 'input', 'tap', '1', '2'])
 
 
@@ -252,7 +266,7 @@ class LoopbackStallTest(unittest.TestCase):
     """2026-11-26 整晚 4 次 21.07 秒／10060 是本機 loopback connect 被丟包，server 全程活著。
 
     舊行為一律 kill-server：毀掉 traced server（trace 停 4.5 小時），
-    並把別的 client 在途的指令打成 rc=255／空 stderr。
+    並把別的 client 在途的指令打成 rc=255／空 stderr。指令逾時走同一條寬限。
     """
 
     def test_only_local_connect_timeout_counts(self):
@@ -274,6 +288,24 @@ class LoopbackStallTest(unittest.TestCase):
             result = adb._run(['shell', 'input', 'tap', '1', '2'])
         self.assertEqual(result.stdout, b'ok')
         self.assertEqual(calls, [TAP, TAP])
+
+    def test_timeout_after_loopback_stall_still_honours_the_single_grace(self):
+        """寬限一次為限：loopback 已用掉，接著逾時就照舊重開。"""
+        calls = []
+        queue = [completed(1, stderr=LOOPBACK_TIMEOUT), completed(0), completed(0),
+                 completed(0, stdout=b'ok')]
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            if len(calls) == 2:
+                raise adb.subprocess.TimeoutExpired(argv, kwargs['timeout'])
+            return queue.pop(0)
+
+        with patched_adb(run):
+            result = adb._run(['shell', 'input', 'tap', '1', '2'])
+        self.assertEqual(result.stdout, b'ok')
+        self.assertEqual(calls, [TAP, TAP, ['adb.exe', 'kill-server'],
+                                 ['adb.exe', 'start-server'], TAP])
 
     def test_loopback_timeout_restarts_server_when_it_repeats(self):
         calls = []

@@ -144,12 +144,14 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
 長腿拆段會加總位移、取最低分數並合併來源，不另算首尾影像。
 
 **adb 這一層斷掉**時，`pkauto/adb.py` 會重試同一個指令，最多 3 次，每次間隔 1.5 秒。
-**恢復方式依錯誤層級分流**：daemon 層級錯誤或逾時 → `kill-server`／`start-server`（無線 IP:PORT 再 `connect`）；
-但**本機 loopback connect 逾時**（`cannot connect to 127.0.0.1:5037 (10060)`，21 秒 SYN 預算用完）
-先**只重送、不砍 server**（server 通常活著；同一個指令第二次仍這樣才重開）；
+**恢復方式依錯誤層級分流**：daemon 層級錯誤（`daemon still not running`，server 真的死了）→ `kill-server`／`start-server`（無線 IP:PORT 再 `connect`）；
+但**指令逾時**（30 秒，代表 connect 成功、指令已送到 server，只是沒回音）與**本機 loopback connect 逾時**
+（`cannot connect to 127.0.0.1:5037 (10060)`，21 秒 SYN 預算用完）都先**只重送、不砍 server**
+（server 通常活著；`kill-server` 會毀掉整條診斷 trace，也會把別的 client 在途的指令打成 `rc=255`／空 stderr；
+同一次呼叫只用一次寬限，第二次還是這樣才照舊重開）；
 裝置暫態（`device offline`／`not found`／`still connecting`／`still authorizing`）→ **只等待重送**，IP:PORT 才補 `connect`，mDNS 名稱交給 adb 自動重連，**不砍 server**（砍掉會摧毀所有 transport，對暫態太重）。
 console 會印「ADB 無回應（原因），重啟 adb server 後重試」、「…等待裝置就緒後重試」
-或「ADB 本機 server 連線逾時（原因），不重啟 server、直接重送」。
+或「ADB 無回應（原因），不重啟 server、直接重送」（原因會寫明是 `10060` 還是 `指令逾時 30s`）。
 
 判斷原則是「**指令到底有沒有送到手機**」，不是錯誤字面：
 
@@ -159,7 +161,8 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」、�
   這些全部在 AOSP 的「選 transport」階段就被拒絕，`shell:input swipe` 字串根本沒寫出去（原始碼依據見「已知」）。
 - **可能已送到 → 重送會多走**：指令卡到 timeout（滑動與其餘皆 30 秒，遠長於任何一個手勢）。
   目前仍重試最多 3 次，所以那一段最多可能多走 3 次；偏移只影響當前這一站，下一站傳送就歸零。
-  實機測試：連續 3 次逾時會停下來並印最後一次的原因，約 30 秒，恢復後 adb 仍可正常使用。
+  實機測試：連續逾時會停下來並印最後一次的原因，之後 adb 仍可正常使用
+  （現在第一次逾時只重送，最壞 4 次逾時 ≈ 2 分鐘）。
 - **確定已送達、但指令本身失敗**（例如手機回 `sh: xxx: not found`、`error: closed`）→ 不重試，直接停下來顯示原因。
 
 重試滿 3 次仍不行才停下來，錯誤訊息會註明「已重試 3 次、重啟 server N 次仍失敗」。
@@ -323,8 +326,12 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」、�
 - **修法**：`_loopback_stalled()` 認出「只有本機 loopback connect 逾時、而且 client 沒有連 spawn 都失敗」
   （`cannot connect to 127.0.0.1:5037` ＋ `(10060)`，且不含 `daemon still not running`）；
   第一次**只重送、不砍 server**，同一個指令第二次還是這樣才照舊 `kill-server`／`start-server`。
-  `daemon still not running`（server 真的死了）與指令逾時維持立刻重開，`device offline` 等暫態照舊只等待。
+  `daemon still not running`（server 真的死了）維持立刻重開，`device offline` 等暫態照舊只等待。
   迴歸測試：`tests/test_adb.py::LoopbackStallTest`。
+- **指令逾時（30 秒）走同一條寬限**：逾時代表 connect 成功、指令已送到 server，只是沒回音，
+  砍 server 同樣會毀掉 trace 並打斷別的 client（剩下的 `rc=255` 風險就在這條）；
+  所以第一次逾時也只重送，第二次才重開。代價是 server 真的卡死時多花一次 30 秒才重開
+  （有上限：同一次呼叫只用一次寬限，不會無限重試）。
 - **殘留**：若連兩次都撞上同一段 loopback 黑洞，最壞多花 21 秒才重開 server（有上限，不會無限重試）。
   遊戲期間若 server 真的被重開，trace 會斷；要讓重開後的 server 也留 trace，
   在啟動遊戲前 `set ADB_TRACE=fdevent,mdns,sockets`（daemon 化的 server 會改寫 `%TEMP%\adb.<pid>.log`）。
