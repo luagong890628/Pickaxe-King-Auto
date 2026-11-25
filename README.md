@@ -145,8 +145,11 @@ $P run_leg.py village --walk L:100 --no-measure   # 從現位置往西 100px
 
 **adb 這一層斷掉**時，`pkauto/adb.py` 會重試同一個指令，最多 3 次，每次間隔 1.5 秒。
 **恢復方式依錯誤層級分流**：daemon 層級錯誤或逾時 → `kill-server`／`start-server`（無線 IP:PORT 再 `connect`）；
+但**本機 loopback connect 逾時**（`cannot connect to 127.0.0.1:5037 (10060)`，21 秒 SYN 預算用完）
+先**只重送、不砍 server**（server 通常活著；同一個指令第二次仍這樣才重開）；
 裝置暫態（`device offline`／`not found`／`still connecting`／`still authorizing`）→ **只等待重送**，IP:PORT 才補 `connect`，mDNS 名稱交給 adb 自動重連，**不砍 server**（砍掉會摧毀所有 transport，對暫態太重）。
-console 會印「ADB 無回應（原因），重啟 adb server 後重試」或「…等待裝置就緒後重試」。
+console 會印「ADB 無回應（原因），重啟 adb server 後重試」、「…等待裝置就緒後重試」
+或「ADB 本機 server 連線逾時（原因），不重啟 server、直接重送」。
 
 判斷原則是「**指令到底有沒有送到手機**」，不是錯誤字面：
 
@@ -304,6 +307,30 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」或�
   但 `serial` 早就被綁成 `None` → 對 `None` 送 `adb connect` → `TypeError`，把真正的錯誤訊息蓋掉。
   改成 `if serial:`；traced server 起好後若 20 秒內沒就緒，會重新偵測一次（處理換埠）。
 - 迴歸測試：`tests/test_adb.py::DetectTargetTest`（含 mDNS 重掃＋換埠、掛掉的 server 重開）。
+
+## 已知（21 秒 10060 改成「先重送、不砍 server」，2026-11-27）
+
+2026-11-26 整晚紀錄（320 站、4h34m、無例外）逐筆分析後做的改動：
+
+- **那 4 次 21.07 秒／`10060` 不是 server 卡死**：`server_trace` 顯示同一秒 server 還在每秒處理
+  其他 client 的請求，被卡住的那條 loopback 連線一直到 21 秒末才出現 `LS(...): created`。
+  21.07 秒正好是 Windows TCP `connect()` 的 SYN 重送預算（3+6+12），所以是本機
+  `client → 127.0.0.1:5037` 這一段被丟包；server 與手機都正常，`proxy_load` 下一條新連線立刻成功。
+- **舊行為的代價**：`_run()` 把 `cannot connect to daemon` 一律當 daemon 層級 → `kill-server`，於是每次事件都
+  (a) 殺掉 traced server，`server_trace_20261126_002936.log` 停在 01:05:40 的 `SS(0): 'host:kill'`，
+  之後 4.5 小時沒有 trace；(b) 把別的 client 在途的指令打成 `rc=255`／空 stderr
+  （`_not_delivered(b"")` 回 False → 直接拋 `RuntimeError`，也就是 2026-11-23 中斷的致命路徑）。
+- **修法**：`_loopback_stalled()` 認出「只有本機 loopback connect 逾時、而且 client 沒有連 spawn 都失敗」
+  （`cannot connect to 127.0.0.1:5037` ＋ `(10060)`，且不含 `daemon still not running`）；
+  第一次**只重送、不砍 server**，同一個指令第二次還是這樣才照舊 `kill-server`／`start-server`。
+  `daemon still not running`（server 真的死了）與指令逾時維持立刻重開，`device offline` 等暫態照舊只等待。
+  迴歸測試：`tests/test_adb.py::LoopbackStallTest`。
+- **殘留**：若連兩次都撞上同一段 loopback 黑洞，最壞多花 21 秒才重開 server（有上限，不會無限重試）。
+  遊戲期間若 server 真的被重開，trace 會斷；要讓重開後的 server 也留 trace，
+  在啟動遊戲前 `set ADB_TRACE=fdevent,mdns,sockets`（daemon 化的 server 會改寫 `%TEMP%\adb.<pid>.log`）。
+- **`captures/stall_watch.py` 的死 pid 盲區**：01:05:42 起它還在量那個已經被殺的 pid，接下來 17,978 筆
+  `handles=0` 全是雜訊。現在每筆紀錄都帶 `server_pid`，pid 一死就重新解析並印
+  `adb server pid X 已結束 → 改追 Y`，沒有 server 時標成 `（目前沒有 server）`。
 
 ## 遊戲事實（使用者確認）
 

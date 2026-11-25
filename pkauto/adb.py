@@ -82,6 +82,20 @@ def _needs_server_restart(stderr: bytes) -> bool:
     return any(marker in text for marker in DAEMON_MARKERS)
 
 
+def _loopback_stalled(stderr: bytes) -> bool:
+    """本機 client → adb server 那一段 connect 逾時（server 通常完全正常）。
+
+    2026-11-26 整晚 trace：每次 21.07 秒／10060 的當下 server 都還在服務其他 client，
+    被卡住的那條 loopback 連線到 21 秒末才出現 `LS(...): created`；21.07 秒正好是 Windows
+    TCP connect 的 SYN 重送預算（3+6+12）→ 重送一條新連線就會過。
+    `daemon still not running` 是 client 連 spawn 都失敗（server 真的死了），不算這一類。
+    """
+    text = stderr.decode("utf-8", "replace").lower()
+    if "daemon still not running" in text:
+        return False
+    return "cannot connect to 127.0.0.1:5037" in text and "(10060)" in text
+
+
 def reconnect_transport() -> None:
     """裝置暫態的輕量恢復：只補 connect，不砍 server。mDNS 名稱由 adb 自動重連。"""
     serial = os.environ.get("ANDROID_SERIAL")
@@ -203,33 +217,46 @@ def restart_server() -> None:
 def _run(args, timeout=30):
     """跑一條 adb 指令；沒送到手機就重試。
 
-    daemon 層級錯誤或逾時才重開 server；裝置暫態只等待重送（見 README「執行」）。
+    daemon 層級錯誤或逾時才重開 server；裝置暫態只等待重送；本機 loopback connect
+    逾時先只重送（見 README「執行」與「已知」）。
     """
     code = None
     reason = ""
+    stderr = b""
     restarts = 0
+    loopback_grace = False
     for attempt in range(SERVER_RESTART_ATTEMPTS + 1):
         try:
             result = subprocess.run(_command(args), capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
-            code, reason, retry, restart = None, f"指令逾時 {timeout}s", True, True
+            code, reason, stderr = None, f"指令逾時 {timeout}s", b""
+            retry = restart = True
         else:
             if not result.returncode:
                 return result
             code = result.returncode
-            reason = result.stderr.decode("utf-8", "replace").strip()
-            retry = _not_delivered(result.stderr)
-            restart = _needs_server_restart(result.stderr)
+            stderr = result.stderr
+            reason = stderr.decode("utf-8", "replace").strip()
+            retry = _not_delivered(stderr)
+            restart = _needs_server_restart(stderr)
         if not retry or attempt == SERVER_RESTART_ATTEMPTS:
             break
-        print(f"ADB 無回應（{reason.splitlines()[0] if reason else '未知錯誤'}），"
-              f"{'重啟 adb server ' if restart else '等待裝置就緒'}後重試"
-              f"（{attempt + 1}/{SERVER_RESTART_ATTEMPTS}）", flush=True)
-        if restart:
-            restart_server()
-            restarts += 1
+        first = reason.splitlines()[0] if reason else "未知錯誤"
+        if restart and not loopback_grace and _loopback_stalled(stderr):
+            # server 沒死，只是本機 loopback 這次 connect 被丟包。kill-server 會毀掉整條診斷 trace，
+            # 也會打斷別的 client 正在傳的指令（2026-11-26 的 rc=255／空 stderr）→ 先只重送。
+            loopback_grace = True
+            print(f"ADB 本機 server 連線逾時（{first}），不重啟 server、直接重送"
+                  f"（{attempt + 1}/{SERVER_RESTART_ATTEMPTS}）", flush=True)
         else:
-            reconnect_transport()
+            print(f"ADB 無回應（{first}），"
+                  f"{'重啟 adb server ' if restart else '等待裝置就緒'}後重試"
+                  f"（{attempt + 1}/{SERVER_RESTART_ATTEMPTS}）", flush=True)
+            if restart:
+                restart_server()
+                restarts += 1
+            else:
+                reconnect_transport()
         time.sleep(SERVER_RESTART_DELAY)
     if attempt:
         reason += f"（已重試 {attempt} 次、重啟 server {restarts} 次仍失敗）"

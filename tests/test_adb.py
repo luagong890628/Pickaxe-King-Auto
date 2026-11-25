@@ -244,6 +244,53 @@ class AdbRecoveryTest(unittest.TestCase):
                 adb._run(['shell', 'input', 'tap', '1', '2'])
 
 
+LOOPBACK_TIMEOUT = (b'adb.exe: cannot connect to daemon at tcp:5037: '
+                    b'cannot connect to 127.0.0.1:5037 (10060)\r\n')
+
+
+class LoopbackStallTest(unittest.TestCase):
+    """2026-11-26 整晚 4 次 21.07 秒／10060 是本機 loopback connect 被丟包，server 全程活著。
+
+    舊行為一律 kill-server：毀掉 traced server（trace 停 4.5 小時），
+    並把別的 client 在途的指令打成 rc=255／空 stderr。
+    """
+
+    def test_only_local_connect_timeout_counts(self):
+        self.assertTrue(adb._loopback_stalled(LOOPBACK_TIMEOUT))
+        # client 連 spawn 都失敗 → server 真的死了，必須重開
+        self.assertFalse(adb._loopback_stalled(DEAD_DAEMON))
+        self.assertFalse(adb._loopback_stalled(b'error: device offline\r\n'))
+        self.assertFalse(adb._loopback_stalled(b''))
+
+    def test_loopback_timeout_retries_without_killing_server(self):
+        calls = []
+        queue = [completed(1, stderr=LOOPBACK_TIMEOUT), completed(0, stdout=b'ok')]
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return queue.pop(0)
+
+        with patched_adb(run):
+            result = adb._run(['shell', 'input', 'tap', '1', '2'])
+        self.assertEqual(result.stdout, b'ok')
+        self.assertEqual(calls, [TAP, TAP])
+
+    def test_loopback_timeout_restarts_server_when_it_repeats(self):
+        calls = []
+        queue = [completed(1, stderr=LOOPBACK_TIMEOUT), completed(1, stderr=LOOPBACK_TIMEOUT),
+                 completed(0), completed(0), completed(0, stdout=b'ok')]
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return queue.pop(0)
+
+        with patched_adb(run):
+            result = adb._run(['shell', 'input', 'tap', '1', '2'])
+        self.assertEqual(result.stdout, b'ok')
+        self.assertEqual(calls, [TAP, TAP, ['adb.exe', 'kill-server'],
+                                 ['adb.exe', 'start-server'], TAP])
+
+
 class AdbPathTest(unittest.TestCase):
     def test_adb_path_honours_override(self):
         with patch.dict(adb.os.environ, {}, clear=True):
