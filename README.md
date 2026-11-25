@@ -288,6 +288,23 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」或�
 - **殘留風險（未修，待決定）**：若遊戲 pin 在 `IP:PORT`，而手機中途換埠（重開無線偵錯／adbd 重啟），
   `_not_delivered()` 的重試只會 `connect` 同一個舊埠 → 3 次後仍失敗。pin 在 mDNS 名稱時不受影響。
 
+## 已知（自動偵測在手機在線時仍報「找不到裝置」，2026-11-26）
+
+- **現象**：`captures\overnight_stall_test.bat` 00:11 啟動時報「找不到任何 adb 裝置」，但手機的
+  無線偵錯是開著的（00:14 手動 `adb connect 192.168.18.21:42549` 一次就成功）。
+  `%TEMP%\adb.log` 顯示那段時間沒有可用的 server（00:11:47 才由測試自己收尾時的 `start-server` 起回來）。
+- **根因**：舊版 `detect_target()` 只看 `devices` 的 stdout，server 掛著時錯誤全在 stderr
+  （`cannot connect to daemon`）→ 被誤判成「手機沒開」；而且 mDNS 分支整段只掃一次，
+  手機晚幾秒才註冊、或註冊的還是舊埠，就直接放棄。
+- **修法**：`detect_target()` 在 `wait_s` 內重複「看 devices → 掃 mDNS → connect 新端點」，
+  每次都重掃所以換埠能自己跟上；`devices` 帶 daemon 錯誤時先 `restart_server()` 一次；
+  失敗訊息附上試過的端點與 adb 錯誤。整晚測試呼叫時 `wait_s=60`；預設值改成 20 秒
+  （實測：server 剛被拉起來時，mDNS 要 12.7 秒才把裝置列進 `devices`，12 秒不夠）。
+- **同一次的另一個 bug**：`overnight_stall_test.py` 收尾用 `"serial" in locals()` 判斷，
+  但 `serial` 早就被綁成 `None` → 對 `None` 送 `adb connect` → `TypeError`，把真正的錯誤訊息蓋掉。
+  改成 `if serial:`；traced server 起好後若 20 秒內沒就緒，會重新偵測一次（處理換埠）。
+- 迴歸測試：`tests/test_adb.py::DetectTargetTest`（含 mDNS 重掃＋換埠、掛掉的 server 重開）。
+
 ## 遊戲事實（使用者確認）
 
 - 角色固定在畫面 **(720,1400)**，畫面跟著角色移動。

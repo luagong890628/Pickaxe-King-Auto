@@ -92,15 +92,38 @@ def reconnect_transport() -> None:
             pass
 
 
-def _online_serials() -> list[str]:
-    """devices 裡狀態真的是 `device` 的 serial。"""
-    r = subprocess.run([adb_path(), "devices"], capture_output=True, timeout=20)
+def _devices() -> tuple[list[str], str]:
+    """(devices 裡狀態真的是 `device` 的 serial, daemon 錯誤文字)。
+
+    舊版只看 stdout：server 掛著時 `adb devices` 的錯誤全在 stderr，會被誤判成「手機沒開」。
+    """
+    try:
+        r = subprocess.run([adb_path(), "devices"], capture_output=True, timeout=20)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return [], f"{type(exc).__name__}: {exc}"
     online = []
     for line in r.stdout.decode("utf-8", "replace").splitlines()[1:]:
         parts = line.split()
         if len(parts) >= 2 and parts[1] == "device":
             online.append(parts[0])
-    return online
+    # rc=0 但 stderr 有訊息是正常的（`* daemon not running; starting now`＝client 自己把 server 拉起來），
+    # 只有非零才是真的連不上 daemon。
+    error = r.stderr.decode("utf-8", "replace").strip() if r.returncode else ""
+    return online, error
+
+
+def _mdns_endpoints() -> list[tuple[str, str]]:
+    """mDNS 目前註冊的 (名稱別名, IP:PORT)。"""
+    try:
+        r = subprocess.run([adb_path(), "mdns", "services"], capture_output=True, timeout=20)
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    found = []
+    for line in r.stdout.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "_adb-tls-connect._tcp":
+            found.append((parts[0] + MDNS_TLS_SUFFIX, parts[2]))
+    return found
 
 
 def _pick_serial(online: list[str]) -> str | None:
@@ -112,38 +135,55 @@ def _pick_serial(online: list[str]) -> str | None:
     return None
 
 
-def detect_target(wait_s: float = 12.0) -> str:
+def detect_target(wait_s: float = 20.0) -> str:
     """自動找出要用的 transport，使用者不需要輸入埠號。
 
     優先序：無線偵錯的 mDNS 名稱 → 無線 IP:PORT → USB，且**回傳的一定是 devices
     裡狀態為 `device` 的那一個**。mDNS 名稱跨埠跳動穩定（實測 11 次換埠名稱不變），
     所以它在線時優先用它；名稱不在線時退回 IP:PORT，不要回一個連不到的 serial。
+
+    2026-11-26：整段都改成在 `wait_s` 內**重複**「看 devices → 掃 mDNS → connect 新端點」。
+    舊版 mDNS 分支只掃一次，手機晚幾秒才註冊（或報的還是舊埠）就直接放棄，
+    但手機其實開著；server 自己掛掉時也只看得到空的 devices（錯誤在 stderr）。
     """
     deadline = time.monotonic() + wait_s
+    tried: list[str] = []
+    error = ""
+    restarted = False
     while True:
-        serial = _pick_serial(_online_serials())
+        online, stderr = _devices()
+        serial = _pick_serial(online)
         if serial:
             return serial
+        error = stderr or error
+        if error and not restarted:
+            # `cannot connect to daemon` 之類：server 掛著時再怎麼掃 mDNS 都沒用，重開一次
+            restart_server()
+            restarted = True
+            error = ""
+            time.sleep(1.0)
+            continue
+        # 2026-11-23 實測：server 重開後同一個無線裝置只會以 IP:PORT 註冊，名稱別名不存在；
+        # 直接回名稱會讓之後每一條指令都 `device '...' not found`，所以一律回 devices 裡在線的那個。
+        for _name, endpoint in _mdns_endpoints():
+            if endpoint in tried:
+                continue        # 每次都重掃：手機換埠時新埠才會被連上
+            tried.append(endpoint)
+            subprocess.run([adb_path(), "connect", endpoint], capture_output=True, timeout=30)
+        if tried:
+            online, _ = _devices()      # 連上不等於馬上列進 devices
+            serial = _pick_serial(online)
+            if serial:
+                return serial
         if time.monotonic() >= deadline:
             break
         time.sleep(1.0)
-    # 沒有任何自動物件：跟 mDNS 要端點、連上去，再確認是哪一個形式真的在線。
-    # 2026-11-23 實測：server 重開後同一個無線裝置只會以 IP:PORT 註冊，名稱別名不存在；
-    # 直接回名稱會讓之後每一條指令都 `device '...' not found`（重試 3 次後整個流程停掉）。
-    r = subprocess.run([adb_path(), "mdns", "services"], capture_output=True, timeout=20)
-    for line in r.stdout.decode("utf-8", "replace").splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[1] == "_adb-tls-connect._tcp":
-            endpoint = parts[2]
-            name = parts[0] + MDNS_TLS_SUFFIX
-            subprocess.run([adb_path(), "connect", endpoint], capture_output=True, timeout=30)
-            for _ in range(20):     # 連上不等於馬上列進 devices
-                online = _online_serials()
-                for candidate in (name, endpoint):
-                    if candidate in online:
-                        return candidate
-                time.sleep(0.5)
-    raise RuntimeError("找不到任何 adb 裝置：請確認手機已開啟無線偵錯，或接上 USB 並允許 USB 偵錯")
+    detail = "devices 沒有在線裝置"
+    detail += f"、mDNS 端點試過 {', '.join(tried)}" if tried else "、mDNS 也掃不到服務"
+    if error:
+        detail += f"、adb 錯誤：{error.splitlines()[0]}"
+    raise RuntimeError("找不到任何 adb 裝置：請確認手機已開啟無線偵錯，或接上 USB 並允許 USB 偵錯"
+                       f"（{detail}）")
 
 
 def restart_server() -> None:

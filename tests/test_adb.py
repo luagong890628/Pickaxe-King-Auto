@@ -1,4 +1,5 @@
 """以 Python 子程序替代 adb，驗證成功與失敗，不連手機。"""
+import itertools
 import sys
 import unittest
 from contextlib import contextmanager
@@ -343,6 +344,70 @@ class DetectTargetTest(unittest.TestCase):
     def test_raises_when_nothing_found(self):
         with self.assertRaisesRegex(RuntimeError, '找不到任何 adb 裝置'):
             self.detect(b'List of devices attached\n')
+
+    def detect_over_time(self, responses, wait_s=5.0):
+        """假時鐘：monotonic 每呼叫一次前進 1 秒，讓重試的路徑可預測。"""
+        calls = []
+        queue = list(responses)
+        clock = itertools.count()
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return queue.pop(0)
+
+        with patch.dict(adb.os.environ, {}, clear=True):
+            with patch.object(adb, 'adb_path', return_value='adb.exe'):
+                with patch.object(adb.subprocess, 'run', side_effect=run):
+                    with patch.object(adb.time, 'sleep'):
+                        with patch.object(adb.time, 'monotonic',
+                                          side_effect=lambda: next(clock)):
+                            return adb.detect_target(wait_s=wait_s), calls
+
+    def test_rescans_mdns_and_follows_port_change(self):
+        """2026-11-26：手機開著但 mDNS 晚幾秒才註冊／中間換埠，舊碼掃一次就報找不到裝置。"""
+        got, calls = self.detect_over_time([
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=b'List of discovered mdns services\n'),
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=self.MDNS_SERVICES),
+            completed(0, stdout=b'connected to 192.168.18.21:41951\n'),
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=b'List of devices attached\n'),
+            completed(0, stdout=b'List of discovered mdns services\n'
+                                b'adb-R5GL15085ZJ-QZEuM7\t_adb-tls-connect._tcp\t'
+                                b'192.168.18.21:42549\n'),
+            completed(0, stdout=b'connected to 192.168.18.21:42549\n'),
+            completed(0, stdout=b'List of devices attached\n'
+                                b'192.168.18.21:42549\tdevice\n'),
+        ])
+        self.assertEqual(got, '192.168.18.21:42549')
+        self.assertIn(['adb.exe', 'connect', '192.168.18.21:41951'], calls)
+        self.assertIn(['adb.exe', 'connect', '192.168.18.21:42549'], calls)
+
+    def test_auto_started_server_is_not_treated_as_error(self):
+        """`adb devices` 自己把 server 拉起來時 rc=0、stderr 有 `daemon not running` —— 不能因此重設 server。"""
+        got, calls = self.detect_over_time([
+            completed(0, stdout=b'List of devices attached\n'
+                      + self.MDNS.encode() + b'\tdevice\n',
+                      stderr=b'* daemon not running; starting now at tcp:5037\n'
+                             b'* daemon started successfully\n'),
+        ])
+        self.assertEqual(got, self.MDNS)
+        self.assertNotIn(['adb.exe', 'kill-server'], calls)
+
+    def test_restarts_dead_server_once_then_detects(self):
+        """devices 的 stderr 是 daemon 錯誤時，先重開 server 再偵測（不是「手機沒開」）。"""
+        got, calls = self.detect_over_time([
+            completed(1, stdout=b'List of devices attached\n',
+                      stderr=b'error: cannot connect to daemon\n'),
+            completed(0),
+            completed(0),
+            completed(0, stdout=b'List of devices attached\n'
+                                + self.MDNS.encode() + b'\tdevice\n'),
+        ])
+        self.assertEqual(got, self.MDNS)
+        self.assertIn(['adb.exe', 'kill-server'], calls)
+        self.assertIn(['adb.exe', 'start-server'], calls)
 
 
 if __name__ == '__main__':
