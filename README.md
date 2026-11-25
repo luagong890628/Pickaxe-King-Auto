@@ -339,6 +339,17 @@ console 會印「ADB 無回應（原因），重啟 adb server 後重試」、�
   `handles=0` 全是雜訊。現在每筆紀錄都帶 `server_pid`，pid 一死就重新解析並印
   `adb server pid X 已結束 → 改追 Y`，沒有 server 時標成 `（目前沒有 server）`。
 
+## 已知（`tests/test_launcher.py` 在 Freebuff 桌面版全紅，2026-11-27）
+
+- **現象**：`test_launcher` 6 項裡 4 failures + 1 error，且 subprocess 那幾項拿到的 stdout 是空的、回傳碼 1。
+- **根因**：那幾項是用 `cmd.exe /d /c launch.bat --dry-run` 起 BAT，靠 cmd 從 cwd 解析裸檔名；
+  這台環境有 `NoDefaultCurrentDirectoryInExePath=1`（Freebuff 桌面版注入，不在 registry），
+  cmd 因此不用 cwd 找執行檔，直接回「'launch.bat' 不是內部或外部命令、可執行的程式或批次檔。」
+  （stderr 是 cp950，所以從 Python 看只有空 stdout + rc=1，很容易誤判成 BAT 壞掉。）
+- **修法**：測試改成 `cmd.exe /d /c .\launch.bat --dry-run`；BAT 本身不用改，實際使用時
+  （Explorer、或路徑明確呼叫）本來就不靠 cwd 解析。已用 `cmd /c .\launch.bat` 與絕對路徑
+  兩種方式確認同一份 BAT 行為一致。
+
 ## 遊戲事實（使用者確認）
 
 - 角色固定在畫面 **(720,1400)**，畫面跟著角色移動。

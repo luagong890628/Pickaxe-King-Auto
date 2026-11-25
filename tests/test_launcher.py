@@ -37,7 +37,9 @@ class LauncherInputTest(unittest.TestCase):
             (root / 'target.txt').write_bytes((target + '\n' if target else '').encode('ascii'))
             (root / 'input.txt').write_bytes(inputs.replace('\n', '\r\n').encode('ascii'))
             with (root / 'input.txt').open('rb') as stream:
-                result = subprocess.run(['cmd.exe', '/d', '/c', 'launch.bat --dry-run'],
+                # 一定要帶 '.\\'：NoDefaultCurrentDirectoryInExePath 設定時（Freebuff 桌面版會設），
+                # cmd 不用 cwd 解析裸檔名，會直接回「不是內部或外部命令」且 stdout 全空。
+                result = subprocess.run(['cmd.exe', '/d', '/c', '.\\launch.bat --dry-run'],
                                         cwd=root, stdin=stream, capture_output=True, timeout=20)
             return result.stdout.decode(errors='replace'), result.returncode
 
